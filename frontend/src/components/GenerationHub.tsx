@@ -127,7 +127,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
                   <span className="text-[10px] font-mono text-slate-400">{game.days}</span>
                 </div>
                 <div className="text-[11px] text-slate-400">
-                  {game.id.includes('POWERBALL') ? '5 Balls (1-50) + 1 PB (1-20)' : '6 Balls (1-52)'}
+                  {game.id.includes('POWERBALL') ? '5 Balls (1-50) + 1 PB (1-16)' : '6 Balls (1-52)'}
                 </div>
               </button>
             );

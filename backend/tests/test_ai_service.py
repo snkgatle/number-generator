@@ -65,8 +65,8 @@ async def test_generate_boards_success(ai_service):
 
 @pytest.mark.asyncio
 async def test_generate_boards_powerball_validation(ai_service):
-    """Verify PowerBall game matrix rule enforcement (5 numbers 1-50, powerball 1-20)."""
-    # Invalid Powerball number 25 (> 20)
+    """Verify PowerBall game matrix rule enforcement (5 numbers 1-50, powerball 1-16)."""
+    # Invalid Powerball number 25 (> 16)
     mock_payload = {
         "game_type": "POWERBALL",
         "boards": [
@@ -89,6 +89,7 @@ async def test_generate_boards_powerball_validation(ai_service):
                 stats_context={},
             )
         assert "powerball 25 out of bounds" in str(exc.value)
+        assert "1-16" in str(exc.value)
 
 
 @pytest.mark.asyncio

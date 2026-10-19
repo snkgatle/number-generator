@@ -56,7 +56,7 @@ GAME_RULES = {
         "has_bonus": False,
         "has_powerball": True,
         "powerball_min": 1,
-        "powerball_max": 20,
+        "powerball_max": 16,
     },
     GameType.POWERBALL_PLUS: {
         "main_numbers_count": 5,
@@ -65,6 +65,6 @@ GAME_RULES = {
         "has_bonus": False,
         "has_powerball": True,
         "powerball_min": 1,
-        "powerball_max": 20,
+        "powerball_max": 16,
     },
 }

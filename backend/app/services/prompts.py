@@ -15,7 +15,7 @@ Rules:
      * "bonus_or_powerball" field: null.
    - POWERBALL / POWERBALL PLUS:
      * "numbers" field: a JSON array of EXACTLY 5 unique integers between 1 and 50 (e.g., [8, 14, 27, 33, 45]), sorted in ascending order.
-     * "bonus_or_powerball" field: an integer between 1 and 20 ONLY (Powerball range is 1-20).
+     * "bonus_or_powerball" field: an integer between 1 and 16 ONLY (Powerball range is 1-16).
 5. In each board, the "numbers" key MUST ALWAYS be a flat JSON array of integers. NEVER output a single integer, string, or nested object for "numbers".
 """
 

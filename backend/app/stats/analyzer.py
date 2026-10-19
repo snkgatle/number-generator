@@ -177,7 +177,7 @@ def calculate_special_ball_stats(
 
     if rules.get("has_powerball"):
         pb_min = rules.get("powerball_min", 1)
-        pb_max = rules.get("powerball_max", 20)
+        pb_max = rules.get("powerball_max", 16)
         pb_counts = {n: 0 for n in range(pb_min, pb_max + 1)}
 
         for d in draws:

@@ -1,0 +1,20 @@
+runtime: nodejs22
+instance_class: F1
+
+automatic_scaling:
+  max_instances: 5
+
+handlers:
+  - url: /assets
+    static_dir: dist/assets
+    secure: always
+
+  - url: /(.*\.(js|css|svg|png|jpg|ico|json|txt|woff2?))
+    static_files: dist/\1
+    upload: dist/(.*\.(js|css|svg|png|jpg|ico|json|txt|woff2?))
+    secure: always
+
+  - url: /.*
+    static_files: dist/index.html
+    upload: dist/index.html
+    secure: always

@@ -21,6 +21,9 @@ from app.models.draw import Draw
 from app.schemas.enums import BoardStatus, GameType
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
+from app.services.dedup_service import DedupService
+from app.services.notifier import Notifier
+from app.services.prize_service import PrizeService
 from app.services.scraper_service import ScraperService
 from app.services.stats_service import StatsService
 
@@ -42,6 +45,9 @@ class PipelineOrchestrator:
         self.ai_service = AIService()
         self.scraper_service = ScraperService()
         self.analytics_service = TemporalAnalyticsService(self.ai_service)
+        self.dedup_service = DedupService()
+        self.prize_service = PrizeService()
+        self.notifier = Notifier()
 
     @staticmethod
     def get_scheduled_games_for_date(ref_date: Optional[date] = None) -> List[GameType]:
@@ -92,6 +98,11 @@ class PipelineOrchestrator:
             allowed, budget = await self.budget_engine.check_circuit_breaker(db, boards_requested=1)
         except BudgetExhaustedException as exc:
             logger.error(f"Pre-Draw Pipeline HALTED: {exc}")
+            await self.notifier.notify_budget_exhaustion(
+                year_month=ref_date.strftime("%Y-%m"),
+                remaining_boards=0,
+                total_budget=str(settings.DEFAULT_MONTHLY_BUDGET),
+            )
             return {
                 "status": "HALTED",
                 "reason": "Budget Exhausted",
@@ -146,11 +157,29 @@ class PipelineOrchestrator:
                 results_by_game[game.value] = {"error": str(err)}
                 continue
 
+            # Directive 12: Deduplicate candidate boards against batch and database
+            unique_boards, collisions = await self.dedup_service.deduplicate_boards(
+                db=db,
+                candidate_boards=ai_response.boards,
+                game_type=game,
+                target_date=ref_date,
+            )
+
+            if not unique_boards:
+                logger.warning(
+                    f"All candidate boards for {game.value} were filtered as duplicates ({collisions} collisions). Skipping."
+                )
+                results_by_game[game.value] = {
+                    "boards_count": 0,
+                    "duplicates_filtered": collisions,
+                }
+                continue
+
             # Persist Boards
             created_for_game: List[GeneratedBoard] = []
             cost_per_board = budget.cost_per_board
 
-            for rec in ai_response.boards:
+            for rec in unique_boards:
                 board = GeneratedBoard(
                     budget_id=budget.id,
                     game_type=game.value,
@@ -237,32 +266,28 @@ class PipelineOrchestrator:
             if not draw:
                 continue
 
-            winning_set = set(draw.numbers)
-            board_set = set(board.numbers)
-            matched_numbers = sorted(list(winning_set.intersection(board_set)))
-            matched_count = len(matched_numbers)
+            # Directive 14: Evaluate against official SA prize tier matrix
+            evaluation = self.prize_service.evaluate_board(
+                game_type=GameType(board.game_type),
+                board_numbers=board.numbers,
+                board_special=board.bonus_or_powerball,
+                winning_numbers=draw.numbers,
+                winning_bonus=draw.bonus_ball,
+                winning_powerball=draw.powerball,
+                cost_per_board=board.cost or Decimal(str(settings.COST_PER_BOARD)),
+            )
 
-            matched_bonus = False
-            if draw.bonus_ball and board.bonus_or_powerball == draw.bonus_ball:
-                matched_bonus = True
-            elif draw.powerball and board.bonus_or_powerball == draw.powerball:
-                matched_bonus = True
-
-            is_win = matched_count >= 3 or (matched_count >= 1 and matched_bonus)
-            status = BoardStatus.WON.value if is_win else BoardStatus.LOST.value
-            division = f"Division Match {matched_count}" + (" + Bonus" if matched_bonus else "")
-
-            board.status = status
+            board.status = BoardStatus.WON.value if evaluation.is_winner else BoardStatus.LOST.value
             board.draw_id = draw.id
 
             result_entity = BoardResult(
                 board_id=board.id,
                 draw_id=draw.id,
-                matched_numbers=matched_numbers,
-                matched_count=matched_count,
-                matched_bonus=matched_bonus,
-                division=division,
-                prize_amount=Decimal("0.00"),
+                matched_numbers=evaluation.matched_numbers,
+                matched_count=evaluation.matched_count,
+                matched_bonus=evaluation.matched_bonus,
+                division=evaluation.division,
+                prize_amount=evaluation.prize_amount,
             )
             db.add(result_entity)
             total_evaluated += 1
@@ -270,11 +295,14 @@ class PipelineOrchestrator:
 
         await db.commit()
 
-        # 3. Trigger Post-Draw AI Feedback Loop for evaluated draws
+        # 3. Broadcast notifications & Trigger Post-Draw AI Feedback Loop for evaluated draws
         feedback_summaries = {}
         if evaluated_draw_ids:
             for draw_id in evaluated_draw_ids:
                 draw = await db.get(Draw, draw_id)
+                if not draw:
+                    continue
+
                 b_res = await db.execute(
                     select(GeneratedBoard).where(GeneratedBoard.draw_id == draw_id)
                 )
@@ -285,7 +313,40 @@ class PipelineOrchestrator:
                 )
                 results = list(r_res.scalars().all())
 
-                if draw and boards:
+                # Calculate Macro Financial ROI across evaluated draw
+                total_winnings = sum((r.prize_amount for r in results), Decimal("0.00"))
+                total_cost = sum((b.cost for b in boards), Decimal("0.00"))
+                net_profit = total_winnings - total_cost
+                roi_pct = float((net_profit / total_cost) * 100) if total_cost > 0 else 0.0
+
+                # Directive alerts: High matches & Draw ROI Summary
+                winning_results = [r for r in results if r.prize_amount > Decimal("0.00")]
+                if winning_results:
+                    win_payload = [
+                        {
+                            "board_id": r.board_id,
+                            "matched_count": r.matched_count,
+                            "division": r.division,
+                            "prize": r.prize_amount,
+                        }
+                        for r in winning_results
+                    ]
+                    await self.notifier.notify_high_matches(
+                        game_type=draw.game_type,
+                        draw_number=draw.draw_number,
+                        winning_boards=win_payload,
+                        total_prize=total_winnings,
+                    )
+
+                await self.notifier.notify_draw_summary(
+                    game_type=draw.game_type,
+                    draw_date=draw.draw_date.isoformat(),
+                    total_boards=len(boards),
+                    total_winnings=total_winnings,
+                    roi_percentage=roi_pct,
+                )
+
+                if boards:
                     try:
                         fb = await self.ai_service.analyze_draw_performance(draw, boards, results)
                         feedback_summaries[f"draw_{draw_id}"] = {

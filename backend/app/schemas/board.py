@@ -87,7 +87,7 @@ class AIBoardRecommendation(BaseModel):
     numbers: List[int] = Field(..., description="Main numbers selected based on statistics")
     bonus_or_powerball: Optional[int] = Field(
         None,
-        description="Powerball number (1-20) if Powerball, otherwise null",
+        description="Powerball number (1-16) if Powerball, otherwise null",
     )
     confidence_score: float = Field(
         ...,

@@ -60,6 +60,20 @@ class Settings(BaseSettings):
         description="Day of month when budget cycle initializes (default 25th)",
     )
 
+    # Alerts & Notifications (Phase 5.5)
+    TELEGRAM_BOT_TOKEN: Optional[str] = Field(
+        default=None,
+        description="Optional Telegram Bot token for push notifications",
+    )
+    TELEGRAM_CHAT_ID: Optional[str] = Field(
+        default=None,
+        description="Optional Telegram Chat ID to receive alerts",
+    )
+    DISCORD_WEBHOOK_URL: Optional[str] = Field(
+        default=None,
+        description="Optional Discord Webhook URL for channel notifications",
+    )
+
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
 

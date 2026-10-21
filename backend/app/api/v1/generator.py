@@ -21,6 +21,8 @@ from app.schemas.enums import GameType
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
 from app.services.budget_service import BudgetExhaustedException, BudgetService
+from app.services.dedup_service import DedupService
+from app.services.notifier import Notifier
 from app.services.stats_service import StatsService
 
 router = APIRouter(prefix="/generator", tags=["Generator"])
@@ -28,6 +30,8 @@ ai_service = AIService()
 stats_service = StatsService()
 budget_service = BudgetService()
 analytics_service = TemporalAnalyticsService(ai_service)
+dedup_service = DedupService()
+notifier = Notifier()
 
 
 @router.get("/boards", response_model=List[GeneratedBoardResponse])
@@ -83,6 +87,11 @@ async def generate_boards(
                 ),
             )
     except BudgetExhaustedException:
+        await notifier.notify_budget_exhaustion(
+            year_month=date.today().strftime("%Y-%m"),
+            remaining_boards=0,
+            total_budget=str(settings.DEFAULT_MONTHLY_BUDGET),
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Budget Exhausted. Board generation halted by Circuit Breaker.",
@@ -119,11 +128,25 @@ async def generate_boards(
             detail=f"AI generation service error: {err}",
         )
 
+    # Directive 12: Deduplicate generated candidate boards
+    unique_boards, collisions = await dedup_service.deduplicate_boards(
+        db=db,
+        candidate_boards=ai_response.boards,
+        game_type=payload.game_type,
+        target_date=target_date,
+    )
+
+    if not unique_boards:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"All {len(ai_response.boards)} candidate boards already exist for {target_date}.",
+        )
+
     # Persist generated boards and deduct quota
     created_boards: List[GeneratedBoard] = []
     board_cost = Decimal(str(settings.COST_PER_BOARD))
 
-    for rec in ai_response.boards:
+    for rec in unique_boards:
         board_entity = GeneratedBoard(
             budget_id=budget.id,
             game_type=payload.game_type.value,

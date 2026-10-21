@@ -50,12 +50,12 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 - [x] Create the APScheduler cron job to run the full pipeline (Stats -> AI -> Budget -> Save) automatically before draws.
 
 ## Phase 5.5: Resilience, Deduplication & ROI
-- [ ] Implement `tenacity` retry logic for DashScope API calls.
-- [ ] Build Statistical and Random fallback generators in case AI fails.
-- [ ] Implement `dedup_service.py` to hash and filter duplicate boards across games for the same date.
-- [ ] Map SA National Lottery prize tiers in `prize_service.py` and calculate ZAR ROI per draw.
-- [ ] Integrate Telegram Bot API or Discord Webhook in `notifier.py` for budget exhaustion and high-match alerts.
-- [ ] Write `pytest` unit tests specifically targeting the Budget Engine circuit breaker and Deduplication logic.
+- [x] Implement `tenacity` retry logic for DashScope API calls.
+- [x] Build Statistical and Random fallback generators in case AI fails.
+- [x] Implement `dedup_service.py` to hash and filter duplicate boards across games for the same date.
+- [x] Map SA National Lottery prize tiers in `prize_service.py` and calculate ZAR ROI per draw.
+- [x] Integrate Telegram Bot API or Discord Webhook in `notifier.py` for budget exhaustion and high-match alerts.
+- [x] Write `pytest` unit tests specifically targeting the Budget Engine circuit breaker and Deduplication logic.
 
 
 ## Phase 6: Frontend Dashboard

@@ -87,9 +87,58 @@ async def test_generate_boards_powerball_validation(ai_service):
                 target_draw_date=date(2026, 10, 20),
                 allocated_boards=1,
                 stats_context={},
+                fallback_on_error=False,
             )
         assert "powerball 25 out of bounds" in str(exc.value)
         assert "1-16" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_generate_boards_graceful_degradation_tier2(ai_service):
+    """Directive 13: When Qwen-Max fails or returns invalid output, gracefully fall back to Tier 2 statistical."""
+    # Mock Qwen failure
+    with patch.object(ai_service, "call_qwen_json", side_effect=Exception("Qwen API Network Timeout")):
+        response = await ai_service.generate_boards(
+            game_type=GameType.LOTTO,
+            target_draw_date=date(2026, 10, 21),
+            allocated_boards=2,
+            stats_context={
+                "hot_numbers": "1, 2, 3, 4, 5, 6, 7, 8, 9, 10",
+                "cold_numbers": "40, 41, 42, 43, 44, 45",
+            },
+            fallback_on_error=True,
+        )
+
+        assert response.game_type == GameType.LOTTO
+        assert len(response.boards) == 2
+        for b in response.boards:
+            assert len(b.numbers) == 6
+            assert len(set(b.numbers)) == 6
+            assert "statistical fallback" in b.reasoning.lower()
+            assert b.confidence_score == 70.0
+
+
+@pytest.mark.asyncio
+async def test_generate_boards_graceful_degradation_tier3_secrets_random(ai_service):
+    """Directive 13: When Tier 2 statistical generation fails, fall back to Tier 3 secrets random generation."""
+    with patch.object(ai_service, "call_qwen_json", side_effect=Exception("Qwen Down")):
+        with patch.object(ai_service, "generate_statistical_fallback", side_effect=Exception("Stats Engine Down")):
+            response = await ai_service.generate_boards(
+                game_type=GameType.POWERBALL,
+                target_draw_date=date(2026, 10, 20),
+                allocated_boards=2,
+                stats_context={},
+                fallback_on_error=True,
+            )
+
+            assert response.game_type == GameType.POWERBALL
+            assert len(response.boards) == 2
+            for b in response.boards:
+                assert len(b.numbers) == 5
+                assert len(set(b.numbers)) == 5
+                assert 1 <= b.bonus_or_powerball <= 16
+                assert "secrets module" in b.reasoning.lower()
+                assert b.confidence_score == 50.0
 
 
 @pytest.mark.asyncio

@@ -11,6 +11,7 @@ from datetime import date
 from http import HTTPStatus
 import json
 import re
+import secrets
 from typing import Any, Dict, List, Optional
 from loguru import logger
 import dashscope
@@ -28,6 +29,7 @@ from app.models.board import BoardResult, GeneratedBoard
 from app.models.draw import Draw
 from app.schemas.analytics import TemporalMetrics, TemporalPatternReviewResponse
 from app.schemas.board import (
+    AIBoardRecommendation,
     AIGenerationResponse,
     PostDrawFeedbackResponse,
 )
@@ -162,8 +164,14 @@ class AIService:
         temporal_bias: Optional[Dict[str, Any]] = None,
         environmental_anomalies: Optional[str] = None,
         historical_draws: Optional[List[Draw]] = None,
+        fallback_on_error: bool = True,
     ) -> AIGenerationResponse:
-        """Prompts Qwen-Max using isolated templates and validates output with Pydantic."""
+        """Prompts Qwen-Max using isolated templates and validates output with Pydantic.
+
+        Directive 13: Graceful degradation - If Qwen-Max fails or returns invalid JSON
+        after 3 retries, falls back to deterministic statistical generation, and if that
+        fails, to secrets cryptographically random generation.
+        """
         logger.info(
             f"Invoking Qwen-Max generation for {game_type.value} on {target_draw_date} "
             f"({allocated_boards} boards requested)"
@@ -224,15 +232,38 @@ class AIService:
             {"role": "user", "content": user_content},
         ]
 
-        raw_json = await self.call_qwen_json(messages)
-
-        # Directive 2: Strict JSON enforcement with Pydantic
+        # Directive 13: 3-tier Graceful Degradation Pipeline
         try:
+            raw_json = await self.call_qwen_json(messages)
             validated_response = AIGenerationResponse(**raw_json)
             validated_response.validate_against_game_rules()
-        except Exception as validation_err:
-            logger.error(f"Pydantic validation failed for Qwen board recommendation: {validation_err}")
-            raise AIServiceError(f"Generated board failed schema validation: {validation_err}")
+        except Exception as primary_err:
+            if not fallback_on_error:
+                logger.error(f"Pydantic validation failed for Qwen board recommendation: {primary_err}")
+                raise AIServiceError(f"Generated board failed schema validation: {primary_err}")
+
+            logger.warning(
+                f"Directive 13: Primary Qwen-Max generation failed after 3 retries ({primary_err}). "
+                f"Degrading gracefully to Tier 2 Deterministic Statistical Generation..."
+            )
+            try:
+                validated_response = self.generate_statistical_fallback(
+                    game_type=game_type,
+                    allocated_boards=allocated_boards,
+                    stats_context=stats_context,
+                    temporal_bias=temporal_bias,
+                )
+                validated_response.validate_against_game_rules()
+            except Exception as stat_err:
+                logger.error(
+                    f"Directive 13: Tier 2 statistical fallback failed ({stat_err}). "
+                    f"Degrading gracefully to Tier 3 secrets random generation..."
+                )
+                validated_response = self.generate_secrets_random_fallback(
+                    game_type=game_type,
+                    allocated_boards=allocated_boards,
+                )
+                validated_response.validate_against_game_rules()
 
         # Directive 15: Run local Python Monte Carlo simulation (minimum 10,000 iterations)
         if historical_draws:
@@ -255,6 +286,126 @@ class AIService:
             f"for {game_type.value}."
         )
         return validated_response
+
+    def generate_statistical_fallback(
+        self,
+        game_type: GameType,
+        allocated_boards: int,
+        stats_context: Dict[str, Any],
+        temporal_bias: Optional[Dict[str, Any]] = None,
+    ) -> AIGenerationResponse:
+        """Directive 13: Tier 2 fallback - Deterministic statistical generation."""
+        from app.schemas.enums import GAME_RULES
+        rules = GAME_RULES.get(game_type, {})
+        main_count = rules.get("main_numbers_count", 6)
+        main_min = rules.get("main_number_min", 1)
+        main_max = rules.get("main_number_max", 52)
+        has_pb = rules.get("has_powerball", False)
+
+        def _parse_nums(val: Any) -> List[int]:
+            if isinstance(val, list):
+                return [int(x) for x in val if isinstance(x, (int, str)) and str(x).isdigit()]
+            elif isinstance(val, str) and val not in ("None", "None detected"):
+                return [int(x.strip()) for x in val.split(",") if x.strip().isdigit()]
+            return []
+
+        hot = _parse_nums(stats_context.get("hot_numbers"))
+        cold = _parse_nums(stats_context.get("cold_numbers"))
+        overdue = _parse_nums(stats_context.get("overdue_numbers"))
+
+        if temporal_bias and isinstance(temporal_bias, dict):
+            boost = temporal_bias.get("boost_numbers") or []
+            if boost:
+                hot = list(dict.fromkeys(boost + hot))
+
+        all_pool = list(range(main_min, main_max + 1))
+        boards: List[AIBoardRecommendation] = []
+
+        for b_idx in range(allocated_boards):
+            chosen = set()
+
+            # Take 2-3 hot numbers
+            for n in hot[b_idx:]:
+                if len(chosen) < min(3, main_count - 2) and main_min <= n <= main_max:
+                    chosen.add(n)
+
+            # Take 1-2 cold numbers
+            for n in cold[b_idx:]:
+                if len(chosen) < min(5, main_count - 1) and main_min <= n <= main_max:
+                    chosen.add(n)
+
+            # Take 1 overdue number
+            for n in overdue[b_idx:]:
+                if len(chosen) < main_count and main_min <= n <= main_max:
+                    chosen.add(n)
+
+            # Fill remaining deterministically from pool
+            offset = (b_idx * 7) % len(all_pool)
+            cycler = all_pool[offset:] + all_pool[:offset]
+            for n in cycler:
+                if len(chosen) >= main_count:
+                    break
+                chosen.add(n)
+
+            pb = None
+            if has_pb:
+                pb_min = rules.get("powerball_min", 1)
+                pb_max = rules.get("powerball_max", 16)
+                pb = pb_min + (b_idx % (pb_max - pb_min + 1))
+
+            boards.append(
+                AIBoardRecommendation(
+                    numbers=sorted(list(chosen)),
+                    bonus_or_powerball=pb,
+                    confidence_score=70.0,
+                    reasoning="Deterministic statistical fallback: balanced historical frequency and parity distribution.",
+                )
+            )
+
+        return AIGenerationResponse(
+            game_type=game_type.value,
+            boards=boards,
+            statistical_analysis_summary="Graceful degradation Tier 2: Deterministic statistical fallback applied.",
+        )
+
+    def generate_secrets_random_fallback(
+        self,
+        game_type: GameType,
+        allocated_boards: int,
+    ) -> AIGenerationResponse:
+        """Directive 13: Tier 3 fallback - Cryptographically secure random generation via secrets."""
+        from app.schemas.enums import GAME_RULES
+        rules = GAME_RULES.get(game_type, {})
+        main_count = rules.get("main_numbers_count", 6)
+        main_min = rules.get("main_number_min", 1)
+        main_max = rules.get("main_number_max", 52)
+        has_pb = rules.get("has_powerball", False)
+
+        sr = secrets.SystemRandom()
+        boards: List[AIBoardRecommendation] = []
+
+        for _ in range(allocated_boards):
+            chosen = sorted(sr.sample(range(main_min, main_max + 1), main_count))
+            pb = None
+            if has_pb:
+                pb_min = rules.get("powerball_min", 1)
+                pb_max = rules.get("powerball_max", 16)
+                pb = sr.randint(pb_min, pb_max)
+
+            boards.append(
+                AIBoardRecommendation(
+                    numbers=chosen,
+                    bonus_or_powerball=pb,
+                    confidence_score=50.0,
+                    reasoning="Graceful degradation Tier 3: Cryptographically secure random generation via secrets module.",
+                )
+            )
+
+        return AIGenerationResponse(
+            game_type=game_type.value,
+            boards=boards,
+            statistical_analysis_summary="Graceful degradation Tier 3: Cryptographically random fallback applied.",
+        )
 
     async def review_weekly_patterns(
         self,

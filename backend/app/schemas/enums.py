@@ -1,3 +1,4 @@
+"""Enumerations for lottery games and board statuses."""
 from datetime import date, timedelta
 from enum import Enum
 from typing import Optional

@@ -17,6 +17,12 @@ import {
   AlertTriangle,
   CheckCircle2,
   Layers,
+  Copy,
+  Check,
+  Calendar,
+  ShieldCheck,
+  Activity,
+  Coins,
 } from 'lucide-react';
 
 interface GenerationHubProps {
@@ -32,18 +38,40 @@ const SUPPORTED_GAMES = [
   { id: 'POWERBALL_PLUS', name: 'POWERBALL PLUS', color: 'from-amber-500 to-orange-700', days: 'Tue & Fri' },
 ];
 
+function getUpcomingDrawDate(gameType: string): string {
+  const isPowerBall = gameType.includes('POWERBALL');
+  const drawDays = isPowerBall ? [2, 5] : [3, 6]; // 2=Tue, 5=Fri; 3=Wed, 6=Sat
+  const now = new Date();
+
+  for (let i = 0; i <= 7; i++) {
+    const candidate = new Date(now);
+    candidate.setDate(now.getDate() + i);
+    if (drawDays.includes(candidate.getDay())) {
+      return candidate.toISOString().split('T')[0];
+    }
+  }
+  return now.toISOString().split('T')[0];
+}
+
 export const GenerationHub: React.FC<GenerationHubProps> = ({
   circuitBreaker,
   onBoardGenerated,
 }) => {
   const [selectedGame, setSelectedGame] = useState<string>('LOTTO');
   const [allocatedBoards, setAllocatedBoards] = useState<number>(1);
+  const [targetDate, setTargetDate] = useState<string>(getUpcomingDrawDate('LOTTO'));
   const [stats, setStats] = useState<StatisticalAnalysis | null>(null);
   const [statsLoading, setStatsLoading] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [generatedBoards, setGeneratedBoards] = useState<GeneratedBoard[]>([]);
+  const [copiedBoardId, setCopiedBoardId] = useState<number | string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  // When selected game changes, update the auto-calculated target date
+  useEffect(() => {
+    setTargetDate(getUpcomingDrawDate(selectedGame));
+  }, [selectedGame]);
 
   // Load statistical summary for selected game
   useEffect(() => {
@@ -62,6 +90,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
 
   const isExhausted = circuitBreaker?.is_exhausted || (circuitBreaker?.remaining_boards ?? 0) <= 0;
   const remainingQuota = circuitBreaker?.remaining_boards ?? 40;
+  const estimatedCostZar = allocatedBoards * 5.0;
 
   const handleGenerate = async () => {
     if (isExhausted) return;
@@ -70,9 +99,11 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
     setGenerating(true);
 
     try {
-      const boards = await generateBoards(selectedGame, allocatedBoards);
+      const boards = await generateBoards(selectedGame, allocatedBoards, targetDate);
       setGeneratedBoards(boards);
-      setSuccessMsg(`Successfully generated ${boards.length} board(s) using DashScope Qwen-Max!`);
+      setSuccessMsg(
+        `Synthesized ${boards.length} board(s) via Qwen-Max for draw on ${targetDate}! Ready for manual play entry.`
+      );
       if (onBoardGenerated) {
         onBoardGenerated();
       }
@@ -83,27 +114,42 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
     }
   };
 
+  const handleCopyBoard = (board: GeneratedBoard, idx: number) => {
+    const mainNumbers = board.numbers.map((n) => n.toString().padStart(2, '0')).join(', ');
+    const extra =
+      board.bonus_or_powerball !== null && board.bonus_or_powerball !== undefined
+        ? ` | ${selectedGame.includes('POWERBALL') ? 'PB' : 'Bonus'}: ${board.bonus_or_powerball
+            .toString()
+            .padStart(2, '0')}`
+        : '';
+    const text = `${board.game_type} (${board.target_draw_date}): ${mainNumbers}${extra}`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedBoardId(board.id || idx);
+    setTimeout(() => setCopiedBoardId(null), 2000);
+  };
+
   const isPowerBallGame = selectedGame.includes('POWERBALL');
 
   return (
     <div className="space-y-6">
-      {/* Top Controls: Game Selector */}
+      {/* Top Controls: Game Selector & Quota */}
       <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur-sm">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Cpu className="w-5 h-5 text-indigo-400" />
-              Qwen-Max Generation Hub
+              Qwen-Max Probabilistic Generation Hub
             </h2>
             <p className="text-xs text-slate-400">
-              Probabilistic number selection weighted by mathematical frequencies and game matrix constraints
+              Multi-factor number synthesis combining historical frequencies, Chi-Square significance, and Monte Carlo stress testing
             </p>
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="text-xs text-slate-400 flex items-center gap-1 font-mono">
-              <Layers className="w-3.5 h-3.5 text-brand-400" />
-              Remaining Quota: <strong className="text-slate-200">{remainingQuota} boards</strong>
+            <span className="text-xs text-slate-400 flex items-center gap-1.5 font-mono px-3 py-1.5 rounded-xl bg-slate-850 border border-slate-800">
+              <Layers className="w-3.5 h-3.5 text-indigo-400" />
+              Remaining Quota: <strong className="text-slate-100">{remainingQuota} boards</strong>
             </span>
           </div>
         </div>
@@ -118,7 +164,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
                 onClick={() => setSelectedGame(game.id)}
                 className={`p-3 rounded-xl border text-left transition-all relative overflow-hidden ${
                   isSelected
-                    ? 'bg-slate-800 border-indigo-500/80 shadow-lg shadow-indigo-500/20 ring-1 ring-indigo-500'
+                    ? 'bg-slate-800 border-indigo-500 shadow-lg shadow-indigo-500/20 ring-1 ring-indigo-500'
                     : 'bg-slate-850/60 border-slate-800 hover:border-slate-750 hover:bg-slate-850'
                 }`}
               >
@@ -135,8 +181,9 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
         </div>
 
         {/* Generation Config Row */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-slate-800">
-          <div className="flex items-center gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pt-4 border-t border-slate-800">
+          <div className="flex flex-wrap items-center gap-6">
+            {/* Board Count Selector */}
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">Board Count</label>
               <div className="flex items-center gap-2">
@@ -156,13 +203,36 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
                 ))}
               </div>
             </div>
+
+            {/* Target Draw Date Input */}
+            <div>
+              <label className="block text-xs font-medium text-slate-300 mb-1 flex items-center gap-1">
+                <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                Target Draw Date
+              </label>
+              <input
+                type="date"
+                value={targetDate}
+                onChange={(e) => setTargetDate(e.target.value)}
+                className="px-3 py-1.5 rounded-lg bg-slate-850 border border-slate-700 text-slate-200 text-xs font-mono focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            {/* Cost Preview */}
+            <div className="hidden sm:block">
+              <label className="block text-xs font-medium text-slate-400 mb-1">Estimated Cost</label>
+              <div className="flex items-center gap-1.5 text-xs font-mono text-slate-200 pt-1">
+                <Coins className="w-3.5 h-3.5 text-amber-400" />
+                <span>R{estimatedCostZar.toFixed(2)} ZAR</span>
+              </div>
+            </div>
           </div>
 
           <div>
             <button
               onClick={handleGenerate}
               disabled={generating || isExhausted}
-              className={`w-full sm:w-auto px-6 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 shadow-xl transition-all ${
+              className={`w-full lg:w-auto px-6 py-3 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 shadow-xl transition-all ${
                 isExhausted
                   ? 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-750'
                   : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-indigo-600 hover:from-emerald-400 hover:to-indigo-500 text-slate-950 font-bold hover:shadow-emerald-500/20 active:scale-[0.98]'
@@ -203,10 +273,10 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
         )}
       </div>
 
-      {/* Statistical Context Preview (Phase 3 Pre-processing) */}
+      {/* Statistical Context Preview */}
       <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur-sm">
         <h3 className="text-sm font-semibold text-slate-200 mb-3 flex items-center gap-2">
-          <Scale className="w-4 h-4 text-brand-400" />
+          <Scale className="w-4 h-4 text-indigo-400" />
           Pre-Processed Statistical Context ({selectedGame})
         </h3>
 
@@ -280,29 +350,59 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
       {/* Generated Boards Results Display */}
       {generatedBoards.length > 0 && (
         <div className="space-y-4">
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
-            <Sparkles className="w-5 h-5 text-emerald-400" />
-            AI Recommended Boards ({generatedBoards.length})
-          </h3>
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-emerald-400" />
+              AI Recommended Boards ({generatedBoards.length})
+            </h3>
+            <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              <span>Collision Checked • Monte Carlo Tested</span>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 gap-4">
             {generatedBoards.map((board, idx) => {
               const isHighConfidence = board.confidence_score >= 85.0;
+              const isCopied = copiedBoardId === (board.id || idx);
+
               return (
                 <div
                   key={board.id || idx}
                   className="p-5 rounded-2xl bg-gradient-to-r from-slate-900/90 via-slate-850/80 to-slate-900/90 border border-slate-800 shadow-xl relative overflow-hidden"
                 >
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-                    <div className="flex items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2.5">
                       <span className="text-xs font-mono font-bold px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 border border-slate-700">
                         Board #{idx + 1}
                       </span>
                       <span className="text-xs font-semibold text-slate-300">{board.game_type}</span>
-                      <span className="text-xs text-slate-400 font-mono">Draw: {board.target_draw_date}</span>
+                      <span className="text-xs text-slate-400 font-mono flex items-center gap-1">
+                        <Calendar className="w-3 h-3 text-slate-500" />
+                        Target Draw: {board.target_draw_date}
+                      </span>
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* Copy Board */}
+                      <button
+                        onClick={() => handleCopyBoard(board, idx)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-300 text-xs font-medium flex items-center gap-1 transition-all"
+                        title="Copy numbers for official lottery entry"
+                      >
+                        {isCopied ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                            <span className="text-emerald-400 font-semibold">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Copy for Lottery App</span>
+                          </>
+                        )}
+                      </button>
+
                       <div
                         className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono border ${
                           isHighConfidence
@@ -310,6 +410,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
                             : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
                         }`}
                       >
+                        <Activity className="w-3 h-3" />
                         <span>{board.confidence_score.toFixed(1)}% Confidence</span>
                         {isHighConfidence && <span className="text-[10px] uppercase font-bold tracking-wider">(Bonus Board)</span>}
                       </div>

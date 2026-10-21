@@ -49,6 +49,7 @@ export interface GeneratedBoard {
   status: string;
   cost: number;
   created_at: string;
+  result?: BoardResult | null;
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -218,7 +219,7 @@ export interface AllocationPlan {
   recommendations: BoardAllocationRecommendation[];
 }
 
-export async function fetchGeneratedBoards(gameType?: string, limit = 50): Promise<GeneratedBoard[]> {
+export async function fetchGeneratedBoards(gameType?: string, limit = 50): Promise<BoardWithResult[]> {
   const url = gameType
     ? `${API_BASE_URL}/generator/boards?limit=${limit}&game_type=${gameType}`
     : `${API_BASE_URL}/generator/boards?limit=${limit}`;

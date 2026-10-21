@@ -25,6 +25,8 @@ from app.services.dedup_service import DedupService
 from app.services.notifier import Notifier
 from app.services.stats_service import StatsService
 
+from sqlalchemy.orm import selectinload
+
 router = APIRouter(prefix="/generator", tags=["Generator"])
 ai_service = AIService()
 stats_service = StatsService()
@@ -34,14 +36,19 @@ dedup_service = DedupService()
 notifier = Notifier()
 
 
-@router.get("/boards", response_model=List[GeneratedBoardResponse])
+@router.get("/boards", response_model=List[BoardWithResultResponse])
 async def list_generated_boards(
     game_type: Optional[GameType] = Query(None, description="Filter by lottery game type"),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve generated lottery boards sorted by creation timestamp descending."""
-    query = select(GeneratedBoard).order_by(GeneratedBoard.created_at.desc()).limit(limit)
+    query = (
+        select(GeneratedBoard)
+        .options(selectinload(GeneratedBoard.result))
+        .order_by(GeneratedBoard.created_at.desc())
+        .limit(limit)
+    )
     if game_type:
         query = query.where(GeneratedBoard.game_type == game_type.value)
     result = await db.execute(query)

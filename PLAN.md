@@ -21,6 +21,20 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 - [x] Write functions to calculate: Hot numbers (top 10), Cold numbers (bottom 10), Odd/Even ratios, and Consecutive pairs from the last 50 draws.
 - [x] Ensure this runs locally in Python *before* calling the LLM to save tokens.
 
+## Phase 3.5: Temporal Analytics Engine
+- [x] Create `temporal_analytics` database table.
+- [x] Write SQL/Python logic to calculate weekly vs monthly sum averages, parity drifts, and co-occurrence pairs.
+- [x] Implement the "Pattern Discovery" Qwen prompts (`PROMPT.md`).
+- [x] Build the APScheduler cron job to run weekly analysis and save Qwen's insights to the DB.
+- [x] Inject the `actionable_bias_for_generation` output into the primary Board Generation prompt context.
+
+## Phase 3.6: Environmental Metadata & Simulation
+- [ ] Add metadata columns to the `draws` database table.
+- [ ] Implement `run_monte_carlo_stress_test()` in `stats_service.py` to validate AI-generated boards locally (10,000 iterations).
+- [ ] Implement `calculate_environmental_correlations()` with strict p-value filtering (p < 0.05 via SciPy) to prevent AI overfitting on machine names or draw times.
+- [ ] Update Qwen prompts to conditionally include validated anomalies and simulation hit rates.
+
+
 ## Phase 4: Qwen-Max AI Integration
 - [x] Integrate `dashscope` SDK.
 - [x] Construct the System Prompt and User Prompt templates (refer to `PROMPT.md`).
@@ -34,6 +48,15 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 - [x] Write the confidence-based allocation algorithm (Base 1 board per draw, extra boards for >85% confidence).
 - [x] Implement the Circuit Breaker check.
 - [x] Create the APScheduler cron job to run the full pipeline (Stats -> AI -> Budget -> Save) automatically before draws.
+
+## Phase 5.5: Resilience, Deduplication & ROI
+- [ ] Implement `tenacity` retry logic for DashScope API calls.
+- [ ] Build Statistical and Random fallback generators in case AI fails.
+- [ ] Implement `dedup_service.py` to hash and filter duplicate boards across games for the same date.
+- [ ] Map SA National Lottery prize tiers in `prize_service.py` and calculate ZAR ROI per draw.
+- [ ] Integrate Telegram Bot API or Discord Webhook in `notifier.py` for budget exhaustion and high-match alerts.
+- [ ] Write `pytest` unit tests specifically targeting the Budget Engine circuit breaker and Deduplication logic.
+
 
 ## Phase 6: Frontend Dashboard
 - [x] Initialize React + Vite + Tailwind.

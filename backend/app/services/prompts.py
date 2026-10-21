@@ -30,7 +30,7 @@ Historical Statistical Context (Last 50 Draws):
 - Most Frequent Odd/Even Ratio: {odd_even_ratio}
 - Recurring Consecutive Pairs: {consecutive_pairs}
 - Most Overdue Numbers: {overdue_numbers}
-
+{temporal_bias_context}
 Instructions:
 Generate exactly {allocated_boards} boards adhering to the {game_type} rules.
 Return a valid JSON object matching this schema:
@@ -76,5 +76,83 @@ Required JSON Structure:
     "Reduce weighting on cold numbers with >15 draws latency.",
     "Prioritize 3:3 parity when top 3 hot numbers are odd."
   ]
+}}
+"""
+
+WEEKLY_PATTERN_REVIEW_SYSTEM_PROMPT = """You are a Data Scientist analyzing temporal variance in lottery matrices.
+Your task is to review weekly (7-day) statistical aggregates compared to the monthly (30-day) baseline.
+Identify any statistically significant deviations, momentum shifts, or structural anomalies.
+Do not claim you can predict the future; describe the current state of the distribution.
+Output strictly in valid JSON matching the required schema.
+"""
+
+WEEKLY_PATTERN_REVIEW_USER_PROMPT = """Game: {game_type}
+Analysis Date: {analysis_date}
+
+Weekly (7-Day) Statistical Aggregates (Sample: {weekly_draws_count} draws):
+- Sum Average: {weekly_sum_avg:.2f} (Std Dev: {weekly_sum_std:.2f})
+- Parity Ratio (Odd:Even): {weekly_parity}
+- Top Frequency Numbers: {weekly_top_freq}
+- Active Co-occurrence Pairs: {weekly_top_pairs}
+
+Monthly (30-Day) Baseline Aggregates (Sample: {monthly_draws_count} draws):
+- Sum Average: {monthly_sum_avg:.2f} (Std Dev: {monthly_sum_std:.2f})
+- Parity Ratio (Odd:Even): {monthly_parity}
+- Top Frequency Numbers: {monthly_top_freq}
+- Baseline Co-occurrence Pairs: {monthly_top_pairs}
+
+Instructions:
+1. Compare weekly performance against monthly baseline.
+2. Identify anomalies or momentum shifts (e.g. sum moving towards extreme percentiles, parity drift, emergent number pairings).
+3. Provide an actionable bias for subsequent board generation (suggested sum range, favored parity, boost/dampen numbers).
+
+Required JSON Structure:
+{{
+  "deviations": ["Weekly sum average of 162.4 is significantly higher than monthly baseline 141.2 (+1.2 sigma)."],
+  "momentum_shifts": ["Numbers 14, 28, 42 show strong recent acceleration."],
+  "hot_pairs": ["Pair 14-28 appeared in 3 of the last 4 draws."],
+  "actionable_bias": {{
+    "suggested_sum_range": [140, 175],
+    "favored_parity": "4:2",
+    "boost_numbers": [14, 28, 42],
+    "dampen_numbers": [3, 11]
+  }},
+  "summary": "Data scientist review summarizing temporal variance and distribution dynamics."
+}}
+"""
+
+MONTHLY_DEEP_DIVE_SYSTEM_PROMPT = """You are a Lead Data Scientist conducting a monthly macro deep-dive on lottery statistical variance.
+Your task is to review multi-week analytical summaries to identify macro-patterns, cyclical behaviors, or long-term drifts invisible on a week-to-week basis.
+Provide a strategic summary for the upcoming month's generations.
+Output strictly in valid JSON matching the required schema.
+"""
+
+MONTHLY_DEEP_DIVE_USER_PROMPT = """Game: {game_type}
+Month Under Review: {year_month}
+
+Aggregated Weekly Summaries:
+{weekly_summaries_block}
+
+Monthly Macro Distribution:
+- Monthly Sum Average: {monthly_sum_avg:.2f} (Std Dev: {monthly_sum_std:.2f})
+- Overall Parity Ratio: {monthly_parity}
+- Top Persistent Pairs: {monthly_top_pairs}
+
+Instructions:
+Synthesize macro trends, cyclical returns, and long-term momentum shifts.
+Formulate strategic guidance and actionable bias parameters for the upcoming month.
+
+Required JSON Structure:
+{{
+  "deviations": ["Sustained upward drift in total draw sum across the month."],
+  "momentum_shifts": ["Decade 20-29 showed increasing representation over 4 consecutive weeks."],
+  "hot_pairs": ["Persistent pairing 17-38 observed across multiple cycles."],
+  "actionable_bias": {{
+    "suggested_sum_range": [135, 165],
+    "favored_parity": "3:3",
+    "boost_numbers": [17, 23, 38],
+    "dampen_numbers": [5, 49]
+  }},
+  "summary": "Monthly strategic deep-dive summary."
 }}
 """

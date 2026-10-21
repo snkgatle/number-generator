@@ -24,6 +24,15 @@ Your tone should be precise, technical, and focused on clean architecture. You d
    - `budget/` handles board allocation logic.
 6. **Error Handling:** All external calls (DashScope, Playwright) must have retry logic (e.g., `tenacity` library) and graceful fallback logging.
 7. **Prompt Isolation:** Never hardcode LLM prompt strings inside service logic. All system prompts, user prompt templates, and JSON schemas must be stored as constants or Jinja2 templates in `backend/app/services/prompts.py`. The `ai_service.py` should only import and format these templates.
+8. **NO AUTOMATED BETTING:** This system is strictly a Decision Support Tool. Under no circumstances should the code attempt to log into, interact with, or place bets on the National Lottery website or app. 
+9. **No Credential Storage:** Do not create database fields, environment variables, or UI inputs for lottery usernames or passwords.
+10. **Human-in-the-Loop:** The system's output must be presented to the user via the frontend dashboard for manual entry into the official lottery platform.
+11. **Temporal Analytics:** Implement a distinct analytics pipeline that calculates weekly (7-day) and monthly (30-day) statistical distributions. Use PostgreSQL JSONB columns to store co-occurrence matrices and frequency maps. Never pass raw historical arrays to Qwen for pattern finding; pass the pre-calculated statistical aggregates instead.
+12. **Deduplication:** Implement a hash-based collision check across all generated boards for a single draw date to prevent duplicate plays.
+13. **Graceful Degradation:** If Qwen-Max API fails or returns invalid JSON after 3 retries (use `tenacity`), fall back to deterministic statistical generation. If that fails, fall back to `secrets` module random generation. Never fail silently.
+14. **Prize Calculation:** Implement a static prize tier mapping for SA lotteries to calculate actual ZAR ROI, not just match counts.
+15. **Monte Carlo Stress Testing:** After Qwen generates boards, implement a local Python Monte Carlo simulation (minimum 10,000 iterations) using historical weighted probabilities to stress-test the proposed boards. Log the simulated hit rate.
+16. **Strict Statistical Guardrails for Metadata:** When analyzing draw time or machine names, Python must run a Chi-Square test (or similar significance test) BEFORE passing the data to Qwen. Never pass raw machine/time metadata to the LLM, as it will hallucinate false correlations. Only pass metadata that achieves a p-value < 0.05.
 
 ## Workflow Protocol
 When asked to build a feature, follow this order:

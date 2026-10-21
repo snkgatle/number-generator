@@ -20,6 +20,7 @@ from app.models.board import BoardResult, GeneratedBoard
 from app.models.draw import Draw
 from app.schemas.enums import BoardStatus, GameType
 from app.services.ai_service import AIService, AIServiceError
+from app.services.analytics_service import TemporalAnalyticsService
 from app.services.scraper_service import ScraperService
 from app.services.stats_service import StatsService
 
@@ -40,6 +41,7 @@ class PipelineOrchestrator:
         self.stats_service = StatsService()
         self.ai_service = AIService()
         self.scraper_service = ScraperService()
+        self.analytics_service = TemporalAnalyticsService(self.ai_service)
 
     @staticmethod
     def get_scheduled_games_for_date(ref_date: Optional[date] = None) -> List[GameType]:
@@ -119,6 +121,9 @@ class PipelineOrchestrator:
                 logger.info(f"Allocation for {game.value} is 0 boards. Skipping.")
                 continue
 
+            # Directive 11: Fetch actionable temporal bias if available
+            temporal_bias = await self.analytics_service.get_latest_actionable_bias(db, game)
+
             # Generate Boards via Qwen-Max (Phase 4)
             try:
                 ai_response = await self.ai_service.generate_boards(
@@ -126,6 +131,7 @@ class PipelineOrchestrator:
                     target_draw_date=ref_date,
                     allocated_boards=boards_to_generate,
                     stats_context=stats_vars,
+                    temporal_bias=temporal_bias,
                 )
             except AIServiceError as err:
                 logger.error(f"AI generation failed for {game.value}: {err}. Skipping game.")
@@ -290,4 +296,56 @@ class PipelineOrchestrator:
             "evaluated_boards_count": total_evaluated,
             "evaluated_draws_count": len(evaluated_draw_ids),
             "feedback_summaries": feedback_summaries,
+        }
+
+    async def execute_weekly_temporal_analysis(
+        self,
+        game_types: Optional[List[GameType]] = None,
+        analysis_date: Optional[date] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> Dict[str, Any]:
+        """Executes weekly temporal variance review for all supported games.
+
+        Directive 11: Saves weekly frequency maps, co-occurrence matrices, and actionable bias.
+        """
+        if db is not None:
+            return await self._run_weekly_temporal_analysis(db, game_types, analysis_date)
+        async with self.session_factory() as session:
+            return await self._run_weekly_temporal_analysis(session, game_types, analysis_date)
+
+    async def _run_weekly_temporal_analysis(
+        self,
+        db: AsyncSession,
+        game_types: Optional[List[GameType]] = None,
+        analysis_date: Optional[date] = None,
+    ) -> Dict[str, Any]:
+        target_games = game_types or [
+            GameType.LOTTO,
+            GameType.LOTTO_PLUS_1,
+            GameType.LOTTO_PLUS_2,
+            GameType.POWERBALL,
+            GameType.POWERBALL_PLUS,
+        ]
+        ref_date = analysis_date or date.today()
+        logger.info(f"Starting Weekly Temporal Analysis pipeline for {len(target_games)} games on {ref_date}")
+
+        results = {}
+        for game in target_games:
+            try:
+                record = await self.analytics_service.run_weekly_analysis(db, game, ref_date)
+                results[game.value] = {
+                    "id": record.id,
+                    "draws_evaluated": record.sample_draws_count,
+                    "sum_average": record.sum_average,
+                    "parity_ratio": record.parity_ratio,
+                    "actionable_bias": record.actionable_bias_for_generation,
+                }
+            except Exception as exc:
+                logger.error(f"Weekly temporal analysis failed for {game.value}: {exc}")
+                results[game.value] = {"error": str(exc)}
+
+        return {
+            "status": "COMPLETED",
+            "analysis_date": ref_date.isoformat(),
+            "games_processed": results,
         }

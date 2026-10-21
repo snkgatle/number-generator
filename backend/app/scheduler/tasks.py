@@ -44,6 +44,16 @@ async def scheduled_monthly_rollover_task():
         logger.error(f"Error in scheduled monthly rollover task: {exc}", exc_info=True)
 
 
+async def scheduled_weekly_temporal_analysis_task():
+    """APScheduler task: Executes weekly temporal variance analysis and Qwen pattern discovery."""
+    logger.info("APScheduler Trigger: Running scheduled Weekly Temporal Analysis...")
+    try:
+        result = await pipeline_orchestrator.execute_weekly_temporal_analysis()
+        logger.info(f"APScheduler Weekly Analysis complete for {len(result.get('games_processed', {}))} games.")
+    except Exception as exc:
+        logger.error(f"Error in scheduled weekly temporal analysis task: {exc}", exc_info=True)
+
+
 def register_scheduled_jobs():
     """Registers standard cron triggers for LottoMind automated workflows."""
     # Pre-Draw Generation: Tue, Wed, Fri, Sat at 18:00
@@ -72,7 +82,16 @@ def register_scheduled_jobs():
         name="LottoMind Monthly Budget Rollover",
         replace_existing=True,
     )
-    logger.info("Registered 3 automated APScheduler jobs (Pre-Draw, Post-Draw, Monthly Rollover).")
+
+    # Weekly Temporal Pattern Review: Every Sunday at 23:00
+    scheduler.add_job(
+        scheduled_weekly_temporal_analysis_task,
+        trigger=CronTrigger(day_of_week="sun", hour=23, minute=0),
+        id="lottomind_weekly_temporal_analysis",
+        name="LottoMind Weekly Temporal Pattern Review",
+        replace_existing=True,
+    )
+    logger.info("Registered 4 automated APScheduler jobs (Pre-Draw, Post-Draw, Monthly Rollover, Weekly Analytics).")
 
 
 def start_scheduler():

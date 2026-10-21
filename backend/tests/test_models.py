@@ -134,3 +134,34 @@ async def test_generated_board_and_result_relationship(db_session):
     assert board.result.matched_count == 4
     assert board.result.matched_bonus is True
     assert board.result.prize_amount == Decimal("1500.00")
+
+
+@pytest.mark.asyncio
+async def test_temporal_analytics_model(db_session):
+    """Directive 11: Verify TemporalAnalytics model persistence with JSON co-occurrence and frequency maps."""
+    from app.models.analytics import TemporalAnalytics
+
+    analytics = TemporalAnalytics(
+        game_type="LOTTO",
+        timeframe="WEEKLY",
+        analysis_date=date(2026, 10, 21),
+        sample_draws_count=8,
+        sum_average=142.5,
+        sum_std_dev=18.2,
+        parity_ratio="3.1:2.9",
+        frequency_map={"7": 4, "14": 3, "22": 5},
+        co_occurrence_matrix={"7-14": 2, "7-22": 3},
+        actionable_bias_for_generation={"favored_parity": "3:3", "suggested_sum_range": [130, 160]},
+        ai_insights="Strong clustering around median numbers with standard parity distribution.",
+    )
+    db_session.add(analytics)
+    await db_session.commit()
+    await db_session.refresh(analytics)
+
+    assert analytics.id is not None
+    assert analytics.game_type == "LOTTO"
+    assert analytics.timeframe == "WEEKLY"
+    assert analytics.frequency_map["22"] == 5
+    assert analytics.co_occurrence_matrix["7-22"] == 3
+    assert analytics.actionable_bias_for_generation["suggested_sum_range"] == [130, 160]
+    assert "clustering" in analytics.ai_insights

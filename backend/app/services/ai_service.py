@@ -23,18 +23,24 @@ from tenacity import (
 )
 
 from app.core.config import settings
+from app.models.analytics import TemporalAnalytics
 from app.models.board import BoardResult, GeneratedBoard
 from app.models.draw import Draw
+from app.schemas.analytics import TemporalMetrics, TemporalPatternReviewResponse
 from app.schemas.board import (
     AIGenerationResponse,
     PostDrawFeedbackResponse,
 )
 from app.schemas.enums import GameType
 from app.services.prompts import (
+    MONTHLY_DEEP_DIVE_SYSTEM_PROMPT,
+    MONTHLY_DEEP_DIVE_USER_PROMPT,
     POST_DRAW_FEEDBACK_SYSTEM_PROMPT,
     POST_DRAW_FEEDBACK_USER_PROMPT,
     PRIMARY_ANALYST_SYSTEM_PROMPT,
     PRIMARY_GENERATION_USER_PROMPT,
+    WEEKLY_PATTERN_REVIEW_SYSTEM_PROMPT,
+    WEEKLY_PATTERN_REVIEW_USER_PROMPT,
 )
 
 
@@ -152,7 +158,8 @@ class AIService:
         game_type: GameType,
         target_draw_date: date,
         allocated_boards: int,
-        stats_context: Dict[str, str],
+        stats_context: Dict[str, Any],
+        temporal_bias: Optional[Dict[str, Any]] = None,
     ) -> AIGenerationResponse:
         """Prompts Qwen-Max using isolated templates and validates output with Pydantic."""
         logger.info(
@@ -173,6 +180,26 @@ class AIService:
                 f"bonus_or_powerball must be null."
             )
 
+        # Build temporal bias context if present
+        bias_payload = temporal_bias or stats_context.get("temporal_bias")
+        if bias_payload and isinstance(bias_payload, dict):
+            bias_parts = ["\nTemporal Analytics Bias (Weekly/Monthly Insights):"]
+            sum_rng = bias_payload.get("suggested_sum_range")
+            if sum_rng:
+                bias_parts.append(f"- Suggested Sum Range: {sum_rng[0]} - {sum_rng[1]}")
+            favored_parity = bias_payload.get("favored_parity")
+            if favored_parity:
+                bias_parts.append(f"- Favored Parity Ratio: {favored_parity}")
+            boost = bias_payload.get("boost_numbers")
+            if boost:
+                bias_parts.append(f"- Momentum Boost Numbers: {', '.join(str(n) for n in boost)}")
+            dampen = bias_payload.get("dampen_numbers")
+            if dampen:
+                bias_parts.append(f"- Dampened Stagnant Numbers: {', '.join(str(n) for n in dampen)}")
+            temporal_bias_context = "\n".join(bias_parts) + "\n"
+        else:
+            temporal_bias_context = ""
+
         user_content = PRIMARY_GENERATION_USER_PROMPT.format(
             game_type=game_type.value,
             target_draw_date=target_draw_date.isoformat(),
@@ -183,6 +210,7 @@ class AIService:
             odd_even_ratio=stats_context.get("odd_even_ratio", "3:3"),
             consecutive_pairs=stats_context.get("consecutive_pairs", "None"),
             overdue_numbers=stats_context.get("overdue_numbers", "None"),
+            temporal_bias_context=temporal_bias_context,
         )
 
         messages = [
@@ -205,6 +233,114 @@ class AIService:
             f"for {game_type.value}."
         )
         return validated_response
+
+    async def review_weekly_patterns(
+        self,
+        game_type: GameType,
+        analysis_date: date,
+        weekly_metrics: TemporalMetrics,
+        monthly_metrics: TemporalMetrics,
+    ) -> TemporalPatternReviewResponse:
+        """Executes weekly pattern discovery comparing short-term variance against baseline."""
+        logger.info(
+            f"Invoking Qwen-Max weekly pattern review for {game_type.value} on {analysis_date}"
+        )
+
+        weekly_freq_str = ", ".join(
+            f"{k}:{v}" for k, v in sorted(weekly_metrics.frequency_map.items(), key=lambda x: x[1], reverse=True)[:8]
+        ) or "None"
+        weekly_pairs_str = ", ".join(
+            f"{k} (x{v})" for k, v in sorted(weekly_metrics.co_occurrence_matrix.items(), key=lambda x: x[1], reverse=True)[:5]
+        ) or "None"
+
+        monthly_freq_str = ", ".join(
+            f"{k}:{v}" for k, v in sorted(monthly_metrics.frequency_map.items(), key=lambda x: x[1], reverse=True)[:10]
+        ) or "None"
+        monthly_pairs_str = ", ".join(
+            f"{k} (x{v})" for k, v in sorted(monthly_metrics.co_occurrence_matrix.items(), key=lambda x: x[1], reverse=True)[:8]
+        ) or "None"
+
+        user_content = WEEKLY_PATTERN_REVIEW_USER_PROMPT.format(
+            game_type=game_type.value,
+            analysis_date=analysis_date.isoformat(),
+            weekly_draws_count=weekly_metrics.sample_draws_count,
+            weekly_sum_avg=weekly_metrics.sum_average,
+            weekly_sum_std=weekly_metrics.sum_std_dev,
+            weekly_parity=weekly_metrics.parity_ratio,
+            weekly_top_freq=weekly_freq_str,
+            weekly_top_pairs=weekly_pairs_str,
+            monthly_draws_count=monthly_metrics.sample_draws_count,
+            monthly_sum_avg=monthly_metrics.sum_average,
+            monthly_sum_std=monthly_metrics.sum_std_dev,
+            monthly_parity=monthly_metrics.parity_ratio,
+            monthly_top_freq=monthly_freq_str,
+            monthly_top_pairs=monthly_pairs_str,
+        )
+
+        messages = [
+            {"role": "system", "content": WEEKLY_PATTERN_REVIEW_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+
+        raw_json = await self.call_qwen_json(messages, temperature=0.5)
+
+        try:
+            validated_review = TemporalPatternReviewResponse(**raw_json)
+        except Exception as val_err:
+            logger.error(f"Weekly pattern review failed schema validation: {val_err}")
+            raise AIServiceError(f"Pattern review failed schema validation: {val_err}")
+
+        return validated_review
+
+    async def review_monthly_deep_dive(
+        self,
+        game_type: GameType,
+        analysis_date: date,
+        weekly_records: List[TemporalAnalytics],
+        monthly_metrics: TemporalMetrics,
+    ) -> TemporalPatternReviewResponse:
+        """Executes monthly macro deep-dive reviewing past multi-week summaries."""
+        logger.info(
+            f"Invoking Qwen-Max monthly deep dive for {game_type.value} on {analysis_date}"
+        )
+
+        lines = []
+        for r in weekly_records:
+            lines.append(
+                f"- Week of {r.analysis_date} ({r.sample_draws_count} draws): "
+                f"sum_avg={r.sum_average}, parity={r.parity_ratio}. "
+                f"Insights: {r.ai_insights or 'None'}"
+            )
+        summaries_block = "\n".join(lines) if lines else "No previous weekly records available."
+
+        monthly_pairs_str = ", ".join(
+            f"{k} (x{v})" for k, v in sorted(monthly_metrics.co_occurrence_matrix.items(), key=lambda x: x[1], reverse=True)[:10]
+        ) or "None"
+
+        user_content = MONTHLY_DEEP_DIVE_USER_PROMPT.format(
+            game_type=game_type.value,
+            year_month=analysis_date.strftime("%Y-%m"),
+            weekly_summaries_block=summaries_block,
+            monthly_sum_avg=monthly_metrics.sum_average,
+            monthly_sum_std=monthly_metrics.sum_std_dev,
+            monthly_parity=monthly_metrics.parity_ratio,
+            monthly_top_pairs=monthly_pairs_str,
+        )
+
+        messages = [
+            {"role": "system", "content": MONTHLY_DEEP_DIVE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ]
+
+        raw_json = await self.call_qwen_json(messages, temperature=0.5)
+
+        try:
+            validated_review = TemporalPatternReviewResponse(**raw_json)
+        except Exception as val_err:
+            logger.error(f"Monthly deep dive failed schema validation: {val_err}")
+            raise AIServiceError(f"Monthly deep dive failed schema validation: {val_err}")
+
+        return validated_review
 
     async def analyze_draw_performance(
         self,

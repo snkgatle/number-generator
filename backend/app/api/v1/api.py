@@ -1,6 +1,6 @@
 """Aggregate v1 API router."""
 from fastapi import APIRouter
-from app.api.v1 import scraper, generator, dashboard, stats
+from app.api.v1 import scraper, generator, dashboard, stats, analytics
 from app.core.config import settings
 from app.core.database import check_db_connection
 
@@ -24,3 +24,4 @@ api_router.include_router(scraper.router)
 api_router.include_router(generator.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(stats.router)
+api_router.include_router(analytics.router)

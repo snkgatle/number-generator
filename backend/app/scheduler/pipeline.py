@@ -121,10 +121,16 @@ class PipelineOrchestrator:
                 logger.info(f"Allocation for {game.value} is 0 boards. Skipping.")
                 continue
 
+            recent_draws = await self.stats_service.get_recent_draws(db, game, limit=50)
+
+            # Directive 16: Check environmental correlations with Chi-Square (p < 0.05 only)
+            env_report = self.stats_service.calculate_environmental_correlations(recent_draws)
+            env_anomalies = env_report.llm_prompt_summary if env_report.has_significant_anomalies else None
+
             # Directive 11: Fetch actionable temporal bias if available
             temporal_bias = await self.analytics_service.get_latest_actionable_bias(db, game)
 
-            # Generate Boards via Qwen-Max (Phase 4)
+            # Generate Boards via Qwen-Max (Phase 4, 3.5, 3.6) with Monte Carlo stress test
             try:
                 ai_response = await self.ai_service.generate_boards(
                     game_type=game,
@@ -132,6 +138,8 @@ class PipelineOrchestrator:
                     allocated_boards=boards_to_generate,
                     stats_context=stats_vars,
                     temporal_bias=temporal_bias,
+                    environmental_anomalies=env_anomalies,
+                    historical_draws=recent_draws,
                 )
             except AIServiceError as err:
                 logger.error(f"AI generation failed for {game.value}: {err}. Skipping game.")

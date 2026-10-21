@@ -203,6 +203,11 @@ class ScraperService:
         else:
             main_numbers = int_numbers[: config["main_count"]]
 
+        # Extract environmental metadata if present in payload
+        machine_name = raw.get("drawMachine") or raw.get("machineName") or raw.get("machine")
+        ball_set = raw.get("ballSet") or raw.get("ballSetName") or raw.get("set")
+        draw_time = raw.get("drawTime") or raw.get("time")
+
         # Construct and validate DrawCreate
         return DrawCreate(
             draw_number=draw_number,
@@ -211,10 +216,16 @@ class ScraperService:
             numbers=main_numbers,
             bonus_ball=bonus_ball,
             powerball=powerball,
+            machine_name=str(machine_name) if machine_name else None,
+            ball_set=str(ball_set) if ball_set else None,
+            draw_time=str(draw_time) if draw_time else None,
             raw_data={
                 "saleMoney": raw.get("saleMoney"),
                 "jackpot": raw.get("jackpot"),
                 "nextJackpot": raw.get("nextJackpot"),
+                "machine": machine_name,
+                "ballSet": ball_set,
+                "drawTime": draw_time,
             },
         )
 
@@ -239,6 +250,9 @@ class ScraperService:
                 "numbers": draw_create.numbers,
                 "bonus_ball": draw_create.bonus_ball,
                 "powerball": draw_create.powerball,
+                "machine_name": draw_create.machine_name,
+                "ball_set": draw_create.ball_set,
+                "draw_time": draw_create.draw_time,
                 "raw_data": draw_create.raw_data,
             }
 

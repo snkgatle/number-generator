@@ -29,10 +29,10 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 - [x] Inject the `actionable_bias_for_generation` output into the primary Board Generation prompt context.
 
 ## Phase 3.6: Environmental Metadata & Simulation
-- [ ] Add metadata columns to the `draws` database table.
-- [ ] Implement `run_monte_carlo_stress_test()` in `stats_service.py` to validate AI-generated boards locally (10,000 iterations).
-- [ ] Implement `calculate_environmental_correlations()` with strict p-value filtering (p < 0.05 via SciPy) to prevent AI overfitting on machine names or draw times.
-- [ ] Update Qwen prompts to conditionally include validated anomalies and simulation hit rates.
+- [x] Add metadata columns to the `draws` database table.
+- [x] Implement `run_monte_carlo_stress_test()` in `stats_service.py` to validate AI-generated boards locally (10,000 iterations).
+- [x] Implement `calculate_environmental_correlations()` with strict p-value filtering (p < 0.05 via SciPy) to prevent AI overfitting on machine names or draw times.
+- [x] Update Qwen prompts to conditionally include validated anomalies and simulation hit rates.
 
 
 ## Phase 4: Qwen-Max AI Integration

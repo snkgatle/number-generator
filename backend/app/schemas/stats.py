@@ -54,3 +54,43 @@ class StatisticalAnalysisResponse(BaseModel):
     consecutive_pairs: List[ConsecutivePair]
     special_ball_stats: Optional[Dict[str, Any]] = None
     llm_prompt_context: LLMPromptContext
+
+
+class EnvironmentalCorrelation(BaseModel):
+    """Chi-Square correlation metric for draw machine, ball set, or draw time."""
+    feature_name: str
+    chi2_statistic: float
+    p_value: float
+    is_significant: bool = Field(
+        ...,
+        description="Directive 16: True ONLY if p_value < 0.05",
+    )
+    degrees_of_freedom: int
+    anomaly_description: Optional[str] = None
+
+
+class EnvironmentalAnalysisReport(BaseModel):
+    """Guardrailed environmental metadata report ensuring p < 0.05 before LLM exposure."""
+    features_analyzed: List[str]
+    significant_anomalies: List[EnvironmentalCorrelation] = Field(default_factory=list)
+    has_significant_anomalies: bool = False
+    llm_prompt_summary: Optional[str] = Field(
+        None,
+        description="Directive 16: Populated ONLY with anomalies where p < 0.05",
+    )
+
+
+class MonteCarloSimulationResult(BaseModel):
+    """Stress test results for a generated board against 10,000 weighted probabilistic draws."""
+    board_index: int
+    numbers: List[int]
+    bonus_or_powerball: Optional[int] = None
+    iterations: int = 10000
+    match_2_or_more_rate: float
+    match_3_or_more_rate: float
+    match_4_or_more_rate: float
+    simulated_hit_rate: float = Field(
+        ...,
+        description="Directive 15: Empirical hit rate across 10,000 weighted simulation draws",
+    )
+    stress_test_passed: bool = True

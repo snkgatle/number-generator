@@ -19,6 +19,7 @@ from app.schemas.board import (
 )
 from app.schemas.enums import GameType
 from app.services.ai_service import AIService, AIServiceError
+from app.services.analytics_service import TemporalAnalyticsService
 from app.services.budget_service import BudgetExhaustedException, BudgetService
 from app.services.stats_service import StatsService
 
@@ -26,6 +27,7 @@ router = APIRouter(prefix="/generator", tags=["Generator"])
 ai_service = AIService()
 stats_service = StatsService()
 budget_service = BudgetService()
+analytics_service = TemporalAnalyticsService(ai_service)
 
 
 @router.get("/boards", response_model=List[GeneratedBoardResponse])
@@ -87,18 +89,29 @@ async def generate_boards(
         )
 
     # Phase 3: Statistical Pre-Processing (Executed locally in Python before calling LLM)
+    recent_draws = await stats_service.get_recent_draws(db, payload.game_type, limit=50)
     stats = await stats_service.get_stats_for_game(db, payload.game_type, sample_size=50)
     prompt_vars = stats_service.format_prompt_variables(stats)
 
+    # Directive 16: Guardrailed environmental metadata test (p < 0.05 only)
+    env_report = stats_service.calculate_environmental_correlations(recent_draws)
+    env_anomalies = env_report.llm_prompt_summary if env_report.has_significant_anomalies else None
+
+    # Directive 11: Fetch actionable temporal bias
+    temporal_bias = await analytics_service.get_latest_actionable_bias(db, payload.game_type)
+
     target_date = payload.target_draw_date or date.today()
 
-    # Phase 4: Qwen-Max Generation with Strict JSON Enforcement
+    # Phase 4: Qwen-Max Generation with Strict JSON Enforcement & Monte Carlo Stress Testing (Directive 15)
     try:
         ai_response = await ai_service.generate_boards(
             game_type=payload.game_type,
             target_draw_date=target_date,
             allocated_boards=requested_boards,
             stats_context=prompt_vars,
+            temporal_bias=temporal_bias,
+            environmental_anomalies=env_anomalies,
+            historical_draws=recent_draws,
         )
     except AIServiceError as err:
         raise HTTPException(

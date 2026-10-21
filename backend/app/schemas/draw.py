@@ -12,7 +12,10 @@ class DrawBase(BaseModel):
     draw_date: date = Field(..., description="Date of the official draw")
     numbers: List[int] = Field(..., description="Sorted list of winning numbers drawn")
     bonus_ball: Optional[int] = Field(None, ge=1, le=52, description="Bonus ball number if applicable")
-    powerball: Optional[int] = Field(None, ge=1, le=20, description="Powerball number if applicable")
+    powerball: Optional[int] = Field(None, ge=1, le=16, description="Powerball number if applicable (1-16)")
+    machine_name: Optional[str] = Field(None, description="Draw machine name if recorded")
+    ball_set: Optional[str] = Field(None, description="Ball set identifier if recorded")
+    draw_time: Optional[str] = Field(None, description="Official broadcast draw time if recorded")
     raw_data: Optional[Dict[str, Any]] = Field(default=None, description="Raw scraped payload/metadata")
 
     @field_validator("numbers")

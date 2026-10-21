@@ -160,6 +160,8 @@ class AIService:
         allocated_boards: int,
         stats_context: Dict[str, Any],
         temporal_bias: Optional[Dict[str, Any]] = None,
+        environmental_anomalies: Optional[str] = None,
+        historical_draws: Optional[List[Draw]] = None,
     ) -> AIGenerationResponse:
         """Prompts Qwen-Max using isolated templates and validates output with Pydantic."""
         logger.info(
@@ -200,6 +202,9 @@ class AIService:
         else:
             temporal_bias_context = ""
 
+        # Directive 16: Conditionally append environmental anomalies ONLY if p < 0.05
+        env_context = environmental_anomalies or stats_context.get("environmental_anomalies") or ""
+
         user_content = PRIMARY_GENERATION_USER_PROMPT.format(
             game_type=game_type.value,
             target_draw_date=target_draw_date.isoformat(),
@@ -211,6 +216,7 @@ class AIService:
             consecutive_pairs=stats_context.get("consecutive_pairs", "None"),
             overdue_numbers=stats_context.get("overdue_numbers", "None"),
             temporal_bias_context=temporal_bias_context,
+            environmental_anomalies_context=env_context,
         )
 
         messages = [
@@ -227,6 +233,22 @@ class AIService:
         except Exception as validation_err:
             logger.error(f"Pydantic validation failed for Qwen board recommendation: {validation_err}")
             raise AIServiceError(f"Generated board failed schema validation: {validation_err}")
+
+        # Directive 15: Run local Python Monte Carlo simulation (minimum 10,000 iterations)
+        if historical_draws:
+            from app.services.stats_service import StatsService
+            stats_svc = StatsService()
+            mc_results = stats_svc.run_monte_carlo_stress_test(
+                boards=validated_response.boards,
+                historical_draws=historical_draws,
+                game_type=game_type,
+                iterations=10000,
+            )
+            for idx, (b, mc) in enumerate(zip(validated_response.boards, mc_results)):
+                logger.info(
+                    f"Board #{idx + 1} Monte Carlo Stress Test: simulated hit rate = {mc.simulated_hit_rate * 100:.2f}% "
+                    f"({mc.iterations:,} iterations)"
+                )
 
         logger.info(
             f"Successfully generated and validated {len(validated_response.boards)} boards "

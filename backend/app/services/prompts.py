@@ -30,7 +30,7 @@ Historical Statistical Context (Last 50 Draws):
 - Most Frequent Odd/Even Ratio: {odd_even_ratio}
 - Recurring Consecutive Pairs: {consecutive_pairs}
 - Most Overdue Numbers: {overdue_numbers}
-{temporal_bias_context}
+{temporal_bias_context}{environmental_anomalies_context}
 Instructions:
 Generate exactly {allocated_boards} boards adhering to the {game_type} rules.
 Return a valid JSON object matching this schema:

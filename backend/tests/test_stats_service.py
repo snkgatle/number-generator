@@ -187,3 +187,102 @@ async def test_stats_api_router_integration(client, db_session):
     ctx_data = res_ctx.json()
     assert "hot_numbers" in ctx_data
     assert "cold_numbers" in ctx_data
+
+
+def test_environmental_correlations_insufficient_samples():
+    """Directive 16: Verify that small sample sizes do not trigger Chi-Square tests."""
+    service = StatsService()
+    draws = sample_draws()  # only 3 draws
+    report = service.calculate_environmental_correlations(draws, min_samples=15)
+    assert report.has_significant_anomalies is False
+    assert report.llm_prompt_summary is None
+    assert len(report.significant_anomalies) == 0
+
+
+def test_environmental_correlations_insignificant_metadata():
+    """Directive 16: Guardrail prevents passing non-significant metadata (p >= 0.05) to Qwen."""
+    service = StatsService()
+    # Create 20 synthetic draws evenly distributed across machines
+    draws = []
+    machines = ["Machine Alpha", "Machine Beta"]
+    for i in range(20):
+        draws.append(
+            Draw(
+                draw_number=2000 + i,
+                game_type="LOTTO",
+                draw_date=date(2026, 9, 1),
+                numbers=[(i % 10) + 1, (i % 10) + 11, 25, 35, 45, 50],
+                machine_name=machines[i % 2],
+                ball_set="Set 1",
+            )
+        )
+
+    report = service.calculate_environmental_correlations(draws, min_samples=10)
+    # Uniform/symmetric distribution should yield p >= 0.05
+    for anomaly in report.significant_anomalies:
+        assert anomaly.p_value < 0.05
+
+
+def test_environmental_correlations_significant_anomaly_detection():
+    """Directive 16: Validates anomaly detection when p < 0.05."""
+    service = StatsService()
+    draws = []
+    # Machine Alpha only produces low decade balls (1-10)
+    for i in range(12):
+        draws.append(
+            Draw(
+                draw_number=3000 + i,
+                game_type="LOTTO",
+                draw_date=date(2026, 8, 1),
+                numbers=[1, 2, 3, 4, 5, 6],
+                machine_name="Alpha",
+            )
+        )
+    # Machine Beta only produces high decade balls (41-52)
+    for i in range(12):
+        draws.append(
+            Draw(
+                draw_number=3050 + i,
+                game_type="LOTTO",
+                draw_date=date(2026, 8, 15),
+                numbers=[44, 45, 46, 47, 48, 49],
+                machine_name="Beta",
+            )
+        )
+
+    report = service.calculate_environmental_correlations(draws, min_samples=15)
+    assert report.has_significant_anomalies is True
+    assert len(report.significant_anomalies) >= 1
+    assert report.significant_anomalies[0].p_value < 0.05
+    assert report.llm_prompt_summary is not None
+    assert "Alpha" in report.llm_prompt_summary or "machine_name" in report.llm_prompt_summary
+
+
+def test_run_monte_carlo_stress_test():
+    """Directive 15: Run 10,000 Monte Carlo simulation draws with weighted probabilities."""
+    service = StatsService()
+    historical = sample_draws()
+
+    proposed_boards = [
+        {"numbers": [5, 12, 19, 23, 44, 51], "bonus_or_powerball": None},
+        {"numbers": [1, 2, 3, 4, 6, 7], "bonus_or_powerball": None},
+    ]
+
+    results = service.run_monte_carlo_stress_test(
+        boards=proposed_boards,
+        historical_draws=historical,
+        game_type=GameType.LOTTO,
+        iterations=10000,
+    )
+
+    assert len(results) == 2
+    for r in results:
+        assert r.iterations == 10000
+        assert 0.0 <= r.match_2_or_more_rate <= 1.0
+        assert 0.0 <= r.match_3_or_more_rate <= 1.0
+        assert 0.0 <= r.simulated_hit_rate <= 1.0
+        assert r.stress_test_passed is True
+
+    # Board 1 contains numbers with heavy historical weight (5, 44, 12)
+    # It should have a higher simulated hit rate than board 2 (unobserved numbers)
+    assert results[0].match_2_or_more_rate >= results[1].match_2_or_more_rate

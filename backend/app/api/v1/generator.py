@@ -252,3 +252,19 @@ async def trigger_weekly_temporal_pipeline(
     """Manually triggers the weekly temporal variance review for all games."""
     from app.scheduler import pipeline_orchestrator
     return await pipeline_orchestrator.execute_weekly_temporal_analysis(db=db)
+
+
+@router.post("/test-telegram")
+async def test_telegram_alert():
+    """Test endpoint to trigger a verification message to Telegram from the backend."""
+    success = await notifier.send_telegram(
+        "🎰 *LottoMind Telegram Alert System*\n\n"
+        "✅ Verified: Cloud Run can successfully communicate with your Telegram Bot!\n"
+        "• Channel: Private Alerts\n"
+        "• Triggers: High Matches, Payout ROI, Budget Circuit Breaker"
+    )
+    return {
+        "success": success,
+        "token_configured": bool(notifier.telegram_token),
+        "chat_id_configured": bool(notifier.telegram_chat_id),
+    }

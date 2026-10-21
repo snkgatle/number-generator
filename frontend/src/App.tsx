@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type ElementType } from 'react';
 import {
   fetchHealth,
   fetchCurrentBudget,
@@ -7,258 +7,205 @@ import {
   MonthlyBudget,
   CircuitBreakerStatus,
 } from './services/api';
-import { BudgetTracker } from './components/BudgetTracker';
+import { Overview } from './components/Overview';
 import { GenerationHub } from './components/GenerationHub';
 import { ResultsView } from './components/ResultsView';
 import { StatsExplorer } from './components/StatsExplorer';
-import {
-  Sparkles,
-  LayoutDashboard,
-  Cpu,
-  Trophy,
-  BarChart3,
-  ShieldCheck,
-  ShieldAlert,
-} from 'lucide-react';
+import { ProgressBar } from './components/ui';
+import { formatZAR } from './utils/format';
+import { LayoutGrid, Sparkles, Trophy, BarChart3, Menu, X, RotateCw } from 'lucide-react';
 
-type Tab = 'dashboard' | 'generator' | 'results' | 'stats';
+export type Tab = 'overview' | 'generate' | 'results' | 'stats';
+
+const NAV: { id: Tab; label: string; icon: ElementType }[] = [
+  { id: 'overview', label: 'Overview', icon: LayoutGrid },
+  { id: 'generate', label: 'Generate boards', icon: Sparkles },
+  { id: 'results', label: 'Results', icon: Trophy },
+  { id: 'stats', label: 'Statistics', icon: BarChart3 },
+];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [navOpen, setNavOpen] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [budget, setBudget] = useState<MonthlyBudget | null>(null);
   const [circuitBreaker, setCircuitBreaker] = useState<CircuitBreakerStatus | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
 
   const loadSystemState = async () => {
-    try {
-      const [hData, bData, cbData] = await Promise.all([
-        fetchHealth().catch(() => null),
-        fetchCurrentBudget().catch(() => null),
-        fetchCircuitBreaker().catch(() => null),
-      ]);
-      if (hData) setHealth(hData);
-      if (bData) setBudget(bData);
-      if (cbData) setCircuitBreaker(cbData);
-    } catch (err: any) {
-      setError(err.message || 'Unable to communicate with LottoMind service');
-    } finally {
-      setLoading(false);
-    }
+    setLoading(true);
+    const [hData, bData, cbData] = await Promise.all([
+      fetchHealth().catch(() => null),
+      fetchCurrentBudget().catch(() => null),
+      fetchCircuitBreaker().catch(() => null),
+    ]);
+    setHealth(hData);
+    if (bData) setBudget(bData);
+    if (cbData) setCircuitBreaker(cbData);
+    setLoading(false);
   };
 
   useEffect(() => {
     loadSystemState();
   }, []);
 
-  const isCircuitBreakerTripped = circuitBreaker?.is_exhausted || (budget?.remaining_boards ?? 40) <= 0;
+  const navigate = (tab: Tab) => {
+    setActiveTab(tab);
+    setNavOpen(false);
+    window.scrollTo({ top: 0 });
+  };
+
+  const totalBoards = budget?.total_boards ?? 40;
+  const remainingBoards = budget?.remaining_boards ?? 0;
+  const remainingZar = budget ? Number(budget.total_budget) - Number(budget.spent_amount) : 0;
+  const usedPct = budget ? (budget.used_boards / Math.max(1, totalBoards)) * 100 : 0;
+  const exhausted = Boolean(circuitBreaker?.is_exhausted) || (budget !== null && remainingBoards <= 0);
+  const apiOnline = health?.status === 'ok';
+  const current = NAV.find((n) => n.id === activeTab)!;
+
+  const sidebar = (
+    <div className="flex h-full flex-col">
+      {/* Brand */}
+      <div className="flex h-14 items-center gap-2.5 border-b border-line px-4">
+        <div className="flex h-7 w-7 items-center justify-center rounded-md border border-line-strong bg-surface-3">
+          <span className="h-3 w-3 rounded-full border-2 border-accent" />
+        </div>
+        <div className="leading-tight">
+          <div className="text-sm font-semibold text-zinc-50">LottoMind</div>
+          <div className="text-2xs text-zinc-500">Lottery analytics</div>
+        </div>
+      </div>
+
+      {/* Navigation */}
+      <nav className="flex-1 space-y-0.5 p-3" aria-label="Primary">
+        {NAV.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            id={`nav-${id}`}
+            onClick={() => navigate(id)}
+            className={`nav-item ${activeTab === id ? 'nav-item-active' : ''}`}
+            aria-current={activeTab === id ? 'page' : undefined}
+          >
+            <Icon className="h-4 w-4" strokeWidth={1.75} />
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Budget summary */}
+      <div className="space-y-3 border-t border-line p-4">
+        <div className="flex items-center justify-between">
+          <span className="eyebrow">Budget · {budget?.year_month ?? '—'}</span>
+          <span className={`dot ${exhausted ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+        </div>
+        <div>
+          <div className="num text-sm font-medium text-zinc-100">
+            {budget ? formatZAR(remainingZar) : '—'} <span className="text-zinc-500">left</span>
+          </div>
+          <div className="mt-0.5 text-xs text-zinc-500">
+            {budget ? `${remainingBoards} of ${totalBoards} boards remaining` : 'Loading…'}
+          </div>
+        </div>
+        <ProgressBar value={usedPct} tone={exhausted ? 'negative' : usedPct > 75 ? 'warning' : 'default'} />
+        <p className="text-2xs leading-relaxed text-zinc-600">
+          Decision support only. Boards are entered manually on the official National Lottery platform.
+        </p>
+      </div>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between selection:bg-brand-500 selection:text-slate-950">
-      {/* Top Navbar */}
-      <header className="border-b border-slate-800/80 bg-slate-900/60 backdrop-blur-xl sticky top-0 z-50 px-4 sm:px-6 py-3.5 shadow-lg shadow-black/40">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
-          {/* Brand Identity */}
+    <div className="min-h-screen bg-surface-0">
+      {/* Desktop sidebar */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 border-r border-line bg-surface-1 lg:block">
+        {sidebar}
+      </aside>
+
+      {/* Mobile sidebar */}
+      {navOpen && (
+        <div className="fixed inset-0 z-40 lg:hidden">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setNavOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-64 border-r border-line bg-surface-1">
+            <button
+              onClick={() => setNavOpen(false)}
+              className="btn btn-ghost btn-sm absolute right-2 top-3"
+              aria-label="Close navigation"
+            >
+              <X className="h-4 w-4" />
+            </button>
+            {sidebar}
+          </aside>
+        </div>
+      )}
+
+      <div className="lg:pl-60">
+        {/* Top bar */}
+        <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-line bg-surface-0/85 px-4 backdrop-blur sm:px-6">
           <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-brand-500 via-emerald-400 to-teal-300 flex items-center justify-center shadow-lg shadow-brand-500/25 ring-1 ring-white/20">
-              <Sparkles className="w-5 h-5 text-slate-950 font-bold" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-black tracking-tight text-white">LottoMind</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-brand-500/15 text-brand-400 font-mono font-bold border border-brand-500/30">
-                  QWEN-MAX AI
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
-                South African National Lottery Analytics & Probabilistic Generation
-              </p>
-            </div>
+            <button
+              onClick={() => setNavOpen(true)}
+              className="btn btn-ghost btn-sm lg:hidden"
+              aria-label="Open navigation"
+            >
+              <Menu className="h-4 w-4" />
+            </button>
+            <span className="text-sm text-zinc-500">LottoMind</span>
+            <span className="text-zinc-700">/</span>
+            <span className="text-sm font-medium text-zinc-200">{current.label}</span>
           </div>
 
-          {/* Navigation Tabs */}
-          <nav className="flex items-center gap-1 bg-slate-850/80 p-1 rounded-xl border border-slate-700/60 backdrop-blur-md">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'dashboard'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+          <div className="flex items-center gap-2">
+            <span
+              className={`badge ${loading ? 'badge-neutral' : apiOnline ? 'badge-success' : 'badge-danger'}`}
+              title={health ? `Database: ${health.database}` : 'Backend unreachable'}
             >
-              <LayoutDashboard className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Dashboard</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('generator')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'generator'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">AI Generator</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('results')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'results'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Trophy className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Results &amp; History</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('stats')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                activeTab === 'stats'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/20'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <BarChart3 className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Stats Matrix</span>
-            </button>
-          </nav>
-
-          {/* Health & Circuit Breaker Status Pill */}
-          <div className="hidden lg:flex items-center gap-2 font-mono text-xs">
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-850 border border-slate-700/60">
               <span
-                className={`w-2 h-2 rounded-full ${
-                  loading ? 'bg-amber-400 animate-pulse' : health?.status === 'ok' ? 'bg-emerald-400' : 'bg-rose-400'
-                }`}
+                className={`dot ${loading ? 'bg-zinc-500 animate-pulse' : apiOnline ? 'bg-emerald-400' : 'bg-rose-400'}`}
               />
-              <span className="text-slate-300">
-                {loading ? 'Checking...' : health?.status === 'ok' ? 'API Online' : 'Degraded'}
-              </span>
-            </div>
-
-            <div
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border ${
-                isCircuitBreakerTripped
-                  ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                  : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-              }`}
-              title="Directive 3: Pre-generation circuit breaker check"
+              {loading ? 'Connecting' : apiOnline ? 'Online' : 'Offline'}
+            </span>
+            <span
+              className={`badge hidden sm:inline-flex ${exhausted ? 'badge-danger' : 'badge-neutral'}`}
+              title="Generation is blocked when the monthly board quota reaches zero"
             >
-              {isCircuitBreakerTripped ? (
-                <>
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  <span>Quota 0</span>
-                </>
-              ) : (
-                <>
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>R{budget ? Number(budget.total_budget - budget.spent_amount).toFixed(0) : '200'} Left</span>
-                </>
-              )}
+              {exhausted ? 'Budget exhausted' : `${remainingBoards} boards left`}
+            </span>
+            <button
+              onClick={loadSystemState}
+              className="btn btn-ghost btn-sm"
+              aria-label="Refresh status"
+              title="Refresh status"
+            >
+              <RotateCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+          </div>
+        </header>
+
+        <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+          {!loading && !health && (
+            <div className="mb-6 rounded-md border border-amber-500/25 bg-amber-500/[0.06] px-3.5 py-2.5 text-sm text-amber-300">
+              The backend could not be reached. Data shown may be incomplete.{' '}
+              <button onClick={loadSystemState} className="underline underline-offset-2 hover:text-amber-200">
+                Retry
+              </button>
             </div>
-          </div>
-        </div>
-      </header>
+          )}
 
-      {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 flex-1 w-full space-y-6">
-        {error && (
-          <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs flex items-center justify-between">
-            <span>Service Note: {error}</span>
-            <button onClick={loadSystemState} className="underline text-amber-200 hover:text-white font-mono">Retry</button>
-          </div>
-        )}
-
-        {/* Always present: Budget Progress & Circuit Breaker Monitor */}
-        <BudgetTracker
-          budget={budget}
-          circuitBreaker={circuitBreaker}
-          loading={loading}
-          onRefresh={loadSystemState}
-        />
-
-        {/* Tab Views */}
-        {activeTab === 'dashboard' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Quick AI Generator Card */}
-              <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur-sm flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold uppercase tracking-wider text-indigo-400 font-mono">
-                      Probabilistic AI Generator
-                    </span>
-                    <span className="text-xs text-slate-400 font-mono">DashScope Qwen-Max</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-white mb-2">Synthesize Next Draw Boards</h3>
-                  <p className="text-xs text-slate-400 leading-relaxed mb-6">
-                    Runs mathematical pre-processing (hot/cold numbers, parity ratio, and overdue latencies) before prompting Qwen-Max for constrained lottery boards.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('generator')}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold text-sm shadow-lg shadow-emerald-500/20 transition-all flex items-center justify-center gap-2"
-                >
-                  <Cpu className="w-4 h-4" />
-                  <span>Open Generation Hub</span>
-                </button>
-              </div>
-
-              {/* Outcome Comparison Card */}
-              <div className="p-6 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl backdrop-blur-sm flex flex-col justify-between">
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold uppercase tracking-wider text-amber-400 font-mono">
-                      Draw Evaluations
-                    </span>
-                    <span className="text-xs text-slate-400 font-mono">Idempotent Sync</span>
-                  </div>
-                  <h3 className="text-xl font-bold text-white mb-2">Match Predictions Against Results</h3>
-                  <p className="text-xs text-slate-400 leading-relaxed mb-6">
-                    Automated Playwright scraper syncs official winning numbers and matches predicted boards, triggering post-draw divergence post-mortems.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('results')}
-                  className="w-full py-3 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-semibold text-sm transition-all flex items-center justify-center gap-2"
-                >
-                  <Trophy className="w-4 h-4 text-amber-400" />
-                  <span>View Historical Results</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Live Stats Explorer Preview */}
-            <StatsExplorer />
-          </div>
-        )}
-
-        {activeTab === 'generator' && (
-          <GenerationHub
-            circuitBreaker={circuitBreaker}
-            onBoardGenerated={loadSystemState}
-          />
-        )}
-
-        {activeTab === 'results' && <ResultsView />}
-
-        {activeTab === 'stats' && <StatsExplorer />}
-      </main>
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-slate-900/40 backdrop-blur-md px-6 py-4 text-center text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <span>LottoMind &copy; {new Date().getFullYear()} &bull; Automated South African Lottery Intelligence</span>
-          <span className="font-mono text-slate-400">
-            Powered by FastAPI &bull; Playwright &bull; Qwen-Max &bull; React &bull; Tailwind
-          </span>
-        </div>
-      </footer>
+          {activeTab === 'overview' && (
+            <Overview
+              budget={budget}
+              circuitBreaker={circuitBreaker}
+              loading={loading}
+              onNavigate={navigate}
+            />
+          )}
+          {activeTab === 'generate' && (
+            <GenerationHub circuitBreaker={circuitBreaker} onBoardGenerated={loadSystemState} />
+          )}
+          {activeTab === 'results' && <ResultsView />}
+          {activeTab === 'stats' && <StatsExplorer />}
+        </main>
+      </div>
     </div>
   );
 }

@@ -8,6 +8,10 @@ interface BallProps {
   className?: string;
 }
 
+/**
+ * Flat lottery number token. Colour is reserved for meaning:
+ * neutral by default, amber for bonus, rose for PowerBall, emerald when matched.
+ */
 export const Ball: React.FC<BallProps> = ({
   number,
   variant = 'standard',
@@ -16,32 +20,52 @@ export const Ball: React.FC<BallProps> = ({
   className = '',
 }) => {
   const sizeClasses = {
-    sm: 'w-7 h-7 text-xs',
-    md: 'w-9 h-9 text-sm',
-    lg: 'w-11 h-11 text-base font-bold',
+    sm: 'h-7 w-7 text-xs',
+    md: 'h-8 w-8 text-[13px]',
+    lg: 'h-10 w-10 text-sm',
   }[size];
 
-  // Colors and 3D specular highlight styling
-  const variantStyles = {
-    standard: isMatched
-      ? 'from-emerald-400 via-emerald-500 to-teal-700 text-slate-950 ring-2 ring-emerald-300 shadow-lg shadow-emerald-500/30'
-      : 'from-slate-700 via-slate-800 to-slate-900 text-slate-100 border border-slate-700/60 shadow-md',
-    bonus: isMatched
-      ? 'from-amber-300 via-amber-400 to-yellow-600 text-slate-950 ring-2 ring-amber-300 shadow-lg shadow-amber-500/40'
-      : 'from-amber-500 via-amber-600 to-yellow-700 text-slate-950 font-bold border border-amber-400/60 shadow-md shadow-amber-600/20',
-    powerball: isMatched
-      ? 'from-rose-400 via-rose-500 to-red-700 text-white ring-2 ring-rose-300 shadow-lg shadow-rose-500/40'
-      : 'from-rose-500 via-red-600 to-red-800 text-white font-bold border border-rose-400/60 shadow-md shadow-rose-600/20',
-  }[variant];
+  let tone: string;
+  if (isMatched) {
+    tone = 'bg-emerald-500/15 text-emerald-300 ring-emerald-500/50';
+  } else if (variant === 'powerball') {
+    tone = 'bg-rose-500/10 text-rose-300 ring-rose-500/35';
+  } else if (variant === 'bonus') {
+    tone = 'bg-amber-500/10 text-amber-300 ring-amber-500/35';
+  } else {
+    tone = 'bg-surface-3 text-zinc-200 ring-line-strong';
+  }
+
+  const label = variant === 'powerball' ? 'PowerBall' : variant === 'bonus' ? 'Bonus ball' : 'Number';
 
   return (
-    <div
-      className={`relative inline-flex items-center justify-center rounded-full bg-gradient-to-br select-none transition-transform hover:scale-105 ${sizeClasses} ${variantStyles} ${className}`}
-      title={`${variant.toUpperCase()}: ${number}${isMatched ? ' (MATCHED)' : ''}`}
+    <span
+      className={`num inline-flex select-none items-center justify-center rounded-full font-medium ring-1 ring-inset ${sizeClasses} ${tone} ${className}`}
+      title={`${label} ${number}${isMatched ? ' — matched' : ''}`}
     >
-      {/* 3D Specular reflection highlight */}
-      <div className="absolute top-1 left-1.5 w-2 h-1.5 bg-white/40 rounded-full blur-[0.5px] pointer-events-none transform -rotate-45" />
-      <span className="relative z-10 font-mono tracking-tighter font-extrabold">{number}</span>
-    </div>
+      {number}
+    </span>
   );
 };
+
+/** Renders a full board (main numbers + optional bonus / PowerBall) in one row. */
+export const BallRow: React.FC<{
+  numbers: number[];
+  extra?: number | null;
+  powerBall?: boolean;
+  matched?: Set<number>;
+  extraMatched?: boolean;
+  size?: 'sm' | 'md' | 'lg';
+}> = ({ numbers, extra, powerBall = false, matched, extraMatched = false, size = 'md' }) => (
+  <div className="flex flex-wrap items-center gap-1.5">
+    {numbers.map((n) => (
+      <Ball key={n} number={n} size={size} isMatched={matched?.has(n)} />
+    ))}
+    {extra !== null && extra !== undefined && (
+      <>
+        <span className="mx-1 h-5 w-px bg-line-strong" aria-hidden />
+        <Ball number={extra} size={size} variant={powerBall ? 'powerball' : 'bonus'} isMatched={extraMatched} />
+      </>
+    )}
+  </div>
+);

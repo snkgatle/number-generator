@@ -2,17 +2,174 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+/* ==========================================================================
+   Base
+   ========================================================================== */
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    @apply bg-surface-0 text-zinc-200 font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+  }
+
+  #root {
+    width: 100%;
+  }
+
+  ::selection {
+    @apply bg-accent/40 text-white;
+  }
+
+  *:focus-visible {
+    @apply outline-none ring-2 ring-accent/60 ring-offset-0;
+  }
+
+  /* Quiet scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2e2e34 transparent;
+  }
 }
 
-body {
-  margin: 0;
-  display: flex;
-  min-width: 320px;
-  min-height: 100vh;
-}
+/* ==========================================================================
+   Components (design system)
+   ========================================================================== */
+@layer components {
+  /* ---- Surfaces ---- */
+  .card {
+    @apply rounded-lg border border-line bg-surface-2;
+  }
+  .card-body {
+    @apply p-5;
+  }
+  .card-header {
+    @apply flex items-start justify-between gap-4 border-b border-line px-5 py-4;
+  }
+  .card-title {
+    @apply text-sm font-semibold text-zinc-100;
+  }
+  .card-subtitle {
+    @apply mt-0.5 text-xs text-zinc-500;
+  }
+  .inset {
+    @apply rounded-md border border-line bg-surface-1;
+  }
 
-#root {
-  width: 100%;
+  /* ---- Typography helpers ---- */
+  .page-title {
+    @apply text-xl font-semibold tracking-tight text-zinc-50;
+  }
+  .page-subtitle {
+    @apply mt-1 text-sm text-zinc-500;
+  }
+  .eyebrow {
+    @apply text-2xs font-medium uppercase tracking-wider text-zinc-500;
+  }
+  .num {
+    @apply font-mono tabular-nums;
+  }
+
+  /* ---- Buttons ---- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md px-3.5 h-9 text-sm font-medium
+           transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-sm {
+    @apply h-8 px-2.5 text-xs;
+  }
+  .btn-primary {
+    @apply bg-accent text-white hover:bg-accent-hover;
+  }
+  .btn-secondary {
+    @apply border border-line-strong bg-surface-3 text-zinc-200 hover:bg-zinc-800 hover:text-white;
+  }
+  .btn-ghost {
+    @apply text-zinc-400 hover:bg-surface-3 hover:text-zinc-100;
+  }
+
+  /* ---- Form controls ---- */
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-zinc-400;
+  }
+  .input {
+    @apply h-9 w-full rounded-md border border-line-strong bg-surface-1 px-3 text-sm text-zinc-100
+           placeholder:text-zinc-600 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/50;
+  }
+
+  /* ---- Segmented control ---- */
+  .segmented {
+    @apply inline-flex items-center gap-0.5 rounded-md border border-line bg-surface-1 p-0.5;
+  }
+  .segmented-item {
+    @apply inline-flex h-7 items-center gap-1.5 rounded px-2.5 text-xs font-medium text-zinc-400
+           transition-colors hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .segmented-item-active {
+    @apply bg-surface-3 text-zinc-50 shadow-[inset_0_0_0_1px_theme(colors.line.strong)];
+  }
+
+  /* ---- Badges ---- */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-2xs font-medium ring-1 ring-inset;
+  }
+  .badge-neutral {
+    @apply bg-zinc-500/10 text-zinc-400 ring-zinc-500/20;
+  }
+  .badge-accent {
+    @apply bg-accent-muted text-indigo-300 ring-accent-border;
+  }
+  .badge-success {
+    @apply bg-emerald-500/10 text-emerald-400 ring-emerald-500/20;
+  }
+  .badge-warning {
+    @apply bg-amber-500/10 text-amber-400 ring-amber-500/20;
+  }
+  .badge-danger {
+    @apply bg-rose-500/10 text-rose-400 ring-rose-500/20;
+  }
+
+  /* ---- Status dot ---- */
+  .dot {
+    @apply inline-block h-1.5 w-1.5 rounded-full;
+  }
+
+  /* ---- Tables ---- */
+  .data-table {
+    @apply w-full text-left text-sm;
+  }
+  .data-table th {
+    @apply border-b border-line px-5 py-2.5 text-2xs font-medium uppercase tracking-wider text-zinc-500;
+  }
+  .data-table td {
+    @apply border-b border-line/60 px-5 py-3 align-middle text-zinc-300;
+  }
+  .data-table tbody tr:last-child td {
+    @apply border-b-0;
+  }
+  .data-table tbody tr {
+    @apply transition-colors hover:bg-surface-3/50;
+  }
+
+  /* ---- Navigation ---- */
+  .nav-item {
+    @apply flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm text-zinc-400 transition-colors
+           hover:bg-surface-3 hover:text-zinc-100;
+  }
+  .nav-item-active {
+    @apply bg-surface-3 text-zinc-50;
+  }
+
+  /* ---- Skeleton ---- */
+  .skeleton {
+    @apply animate-pulse rounded bg-zinc-800/60;
+  }
 }

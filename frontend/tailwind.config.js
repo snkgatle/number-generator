@@ -6,20 +6,32 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+      },
       colors: {
-        brand: {
-          50: '#f0fdf4',
-          100: '#dcfce7',
-          500: '#22c55e',
-          600: '#16a34a',
-          700: '#15803d',
-          900: '#14532d',
+        // Single restrained accent used for primary actions, focus and active navigation.
+        accent: {
+          DEFAULT: '#6e79d6',
+          hover: '#7f89e0',
+          muted: 'rgba(110, 121, 214, 0.12)',
+          border: 'rgba(110, 121, 214, 0.35)',
         },
-        slate: {
-          850: '#172033',
-          950: '#0b0f19',
-        }
-      }
+        surface: {
+          0: '#09090b',   // app background
+          1: '#0f0f12',   // sidebar / top bar
+          2: '#131316',   // cards
+          3: '#1a1a1e',   // inset / hover
+        },
+        line: {
+          DEFAULT: '#232328',
+          strong: '#2e2e34',
+        },
+      },
+      fontSize: {
+        '2xs': ['0.6875rem', { lineHeight: '1rem' }],
+      },
     },
   },
   plugins: [],

@@ -17,7 +17,7 @@ from app.schemas.board import (
     PostDrawFeedbackResponse,
     PreDrawPipelineRequest,
 )
-from app.schemas.enums import GameType
+from app.schemas.enums import GameType, get_next_draw_date
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
 from app.services.budget_service import BudgetExhaustedException, BudgetService
@@ -109,7 +109,7 @@ async def generate_boards(
     # Directive 11: Fetch actionable temporal bias
     temporal_bias = await analytics_service.get_latest_actionable_bias(db, payload.game_type)
 
-    target_date = payload.target_draw_date or date.today()
+    target_date = payload.target_draw_date or get_next_draw_date(payload.game_type)
 
     # Phase 4: Qwen-Max Generation with Strict JSON Enforcement & Monte Carlo Stress Testing (Directive 15)
     try:
@@ -236,3 +236,12 @@ async def trigger_post_draw_pipeline(
     """Manually triggers the automated Post-Draw Pipeline (Scrape -> Match -> Evaluate -> Feedback)."""
     from app.scheduler import pipeline_orchestrator
     return await pipeline_orchestrator.execute_post_draw_pipeline(db=db)
+
+
+@router.post("/pipeline/weekly-temporal")
+async def trigger_weekly_temporal_pipeline(
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually triggers the weekly temporal variance review for all games."""
+    from app.scheduler import pipeline_orchestrator
+    return await pipeline_orchestrator.execute_weekly_temporal_analysis(db=db)

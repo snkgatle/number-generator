@@ -251,13 +251,14 @@ class PipelineOrchestrator:
         logger.info(f"Found {len(pending_boards)} pending generated boards to evaluate.")
 
         for board in pending_boards:
+            # Match the first completed official draw occurring on or after target_draw_date
             draw_query = (
                 select(Draw)
                 .where(
                     Draw.game_type == board.game_type,
-                    Draw.draw_date == board.target_draw_date,
+                    Draw.draw_date >= board.target_draw_date,
                 )
-                .order_by(Draw.draw_number.desc())
+                .order_by(Draw.draw_date.asc(), Draw.draw_number.asc())
                 .limit(1)
             )
             draw_res = await db.execute(draw_query)

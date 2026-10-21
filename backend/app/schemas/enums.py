@@ -1,5 +1,6 @@
-"""Enumerations for lottery games and board statuses."""
+from datetime import date, timedelta
 from enum import Enum
+from typing import Optional
 
 
 class GameType(str, Enum):
@@ -68,3 +69,25 @@ GAME_RULES = {
         "powerball_max": 16,
     },
 }
+
+# Standard draw schedule mapping by weekday (0=Monday, 1=Tuesday, ..., 6=Sunday)
+GAME_DRAW_DAYS = {
+    GameType.POWERBALL: [1, 4],          # Tuesday, Friday
+    GameType.POWERBALL_PLUS: [1, 4],     # Tuesday, Friday
+    GameType.LOTTO: [2, 5],              # Wednesday, Saturday
+    GameType.LOTTO_PLUS_1: [2, 5],       # Wednesday, Saturday
+    GameType.LOTTO_PLUS_2: [2, 5],       # Wednesday, Saturday
+}
+
+
+def get_next_draw_date(game_type: GameType, ref_date: Optional[date] = None) -> date:
+    """Calculates the upcoming scheduled draw date for a given lottery game."""
+    base = ref_date or date.today()
+    draw_days = GAME_DRAW_DAYS.get(game_type, [1, 2, 4, 5])
+
+    for offset in range(7):
+        candidate = base + timedelta(days=offset)
+        if candidate.weekday() in draw_days:
+            return candidate
+    return base
+

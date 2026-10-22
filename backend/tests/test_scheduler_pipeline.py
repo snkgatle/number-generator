@@ -40,11 +40,11 @@ async def test_pre_draw_pipeline_execution(orchestrator, db_session):
 
         assert result["status"] == "COMPLETED"
         assert result["generated_boards_count"] == 1
-        assert result["remaining_budget_boards"] == 39
+        assert result["remaining_budget_boards"] == 19
 
         # Verify board was saved in DB
         from sqlalchemy import select
-        b_res = await db_session.execute(select(GeneratedBoard).where(GeneratedBoard.game_type == "LOTTO"))
+        b_res = await db_session.execute(select(GeneratedBoard).where(GeneratedBoard.bundle_name == "LOTTO_FAMILY"))
         saved = b_res.scalars().all()
         assert len(saved) >= 1
         assert saved[-1].numbers == [4, 12, 19, 23, 44, 51]

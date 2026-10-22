@@ -9,7 +9,7 @@ Adheres strictly to:
 import calendar
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,7 +21,7 @@ from app.schemas.budget import (
     BoardAllocationRecommendation,
     CircuitBreakerStatus,
 )
-from app.schemas.enums import GameType
+from app.schemas.enums import BundleType, GameType
 
 
 class BudgetExhaustedException(Exception):
@@ -32,7 +32,8 @@ class BudgetExhaustedException(Exception):
 class BudgetEngine:
     """Manages monthly lottery budgets, circuit breakers, and confidence-driven board allocations."""
 
-    CONFIDENCE_BONUS_THRESHOLD: float = 85.0
+    # Directive 23 & Phase 1.5: Raised to 90% due to higher bundle board cost (R10)
+    CONFIDENCE_BONUS_THRESHOLD: float = 90.0
 
     @staticmethod
     def get_cycle_date_range(target_date: Optional[date] = None) -> Tuple[date, date, str]:
@@ -201,7 +202,7 @@ class BudgetEngine:
     async def calculate_confidence_allocation(
         self,
         db: AsyncSession,
-        game_type: GameType,
+        game_type: Union[GameType, BundleType, str],
         target_date: Optional[date] = None,
         confidence_score: Optional[float] = None,
     ) -> BoardAllocationRecommendation:
@@ -210,7 +211,7 @@ class BudgetEngine:
         Rules:
         1. Query monthly_budgets and enforce Circuit Breaker (halt if remaining <= 0).
         2. Base allocation: 1 board per draw.
-        3. Confidence Bonus: If confidence_score >= 85.0%, allocate +1 bonus board
+        3. Confidence Bonus: If confidence_score >= 90.0%, allocate +1 bonus board
            (provided remaining quota > total remaining draws to avoid early budget starvation).
         4. Hard cap: Total allocated boards can never exceed remaining_boards.
         """
@@ -256,8 +257,9 @@ class BudgetEngine:
                 f"Allocation capped from {candidate_total} to {total_allocated} by remaining monthly quota."
             )
 
+        game_val = game_type.value if hasattr(game_type, "value") else str(game_type)
         return BoardAllocationRecommendation(
-            game_type=game_type.value,
+            game_type=game_val,
             target_draw_date=draw_date.isoformat(),
             base_boards=base_boards,
             bonus_boards=bonus_boards,

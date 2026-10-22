@@ -12,7 +12,7 @@ from http import HTTPStatus
 import json
 import re
 import secrets
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 import dashscope
 from dashscope import Generation
@@ -33,7 +33,7 @@ from app.schemas.board import (
     AIGenerationResponse,
     PostDrawFeedbackResponse,
 )
-from app.schemas.enums import GameType
+from app.schemas.enums import BUNDLE_RULES, BundleType, GAME_RULES, GameType
 from app.services.prompts import (
     MONTHLY_DEEP_DIVE_SYSTEM_PROMPT,
     MONTHLY_DEEP_DIVE_USER_PROMPT,
@@ -157,7 +157,7 @@ class AIService:
 
     async def generate_boards(
         self,
-        game_type: GameType,
+        game_type: Union[GameType, BundleType, str],
         target_draw_date: date,
         allocated_boards: int,
         stats_context: Dict[str, Any],
@@ -172,13 +172,17 @@ class AIService:
         after 3 retries, falls back to deterministic statistical generation, and if that
         fails, to secrets cryptographically random generation.
         """
+        raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
         logger.info(
-            f"Invoking Qwen-Max generation for {game_type.value} on {target_draw_date} "
+            f"Invoking Qwen-Max generation for {raw_key} on {target_draw_date} "
             f"({allocated_boards} boards requested)"
         )
 
-        from app.schemas.enums import GAME_RULES
-        rules = GAME_RULES.get(game_type, {})
+        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            rules = BUNDLE_RULES.get(BundleType(raw_key), {})
+        else:
+            rules = GAME_RULES.get(game_type, {})
+
         if rules.get("has_powerball"):
             rules_summary = (
                 f"Pick exactly {rules['main_numbers_count']} main numbers (range {rules['main_number_min']}-{rules['main_number_max']}) "
@@ -215,8 +219,16 @@ class AIService:
 
         adv_math = stats_context.get("advanced_math_context", "")
 
+        # Directive 22: Append bundle intersection context if available
+        inter_parts = []
+        if stats_context.get("sub_draw_breakdown"):
+            inter_parts.append(f"\n- Sub-Draw Hot Candidates Breakdown:\n{stats_context['sub_draw_breakdown']}")
+        if stats_context.get("statistical_intersection"):
+            inter_parts.append(f"- Bundle Statistical Intersection (Shared Candidates): {stats_context['statistical_intersection']}")
+        bundle_inter_ctx = "\n".join(inter_parts)
+
         user_content = PRIMARY_GENERATION_USER_PROMPT.format(
-            game_type=game_type.value,
+            game_type=raw_key,
             target_draw_date=target_draw_date.isoformat(),
             allocated_boards=allocated_boards,
             game_matrix_rules=rules_summary,
@@ -225,6 +237,7 @@ class AIService:
             odd_even_ratio=stats_context.get("odd_even_ratio", "3:3"),
             consecutive_pairs=stats_context.get("consecutive_pairs", "None"),
             overdue_numbers=stats_context.get("overdue_numbers", "None"),
+            bundle_intersection_context=bundle_inter_ctx,
             advanced_math_context=adv_math,
             temporal_bias_context=temporal_bias_context,
             environmental_anomalies_context=env_context,
@@ -325,14 +338,17 @@ class AIService:
 
     def generate_statistical_fallback(
         self,
-        game_type: GameType,
+        game_type: Union[GameType, BundleType, str],
         allocated_boards: int,
         stats_context: Dict[str, Any],
         temporal_bias: Optional[Dict[str, Any]] = None,
     ) -> AIGenerationResponse:
         """Directive 13: Tier 2 fallback - Deterministic statistical generation."""
-        from app.schemas.enums import GAME_RULES
-        rules = GAME_RULES.get(game_type, {})
+        raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
+        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            rules = BUNDLE_RULES.get(BundleType(raw_key), {})
+        else:
+            rules = GAME_RULES.get(game_type, {})
         main_count = rules.get("main_numbers_count", 6)
         main_min = rules.get("main_number_min", 1)
         main_max = rules.get("main_number_max", 52)
@@ -450,12 +466,15 @@ class AIService:
 
     def generate_secrets_random_fallback(
         self,
-        game_type: GameType,
+        game_type: Union[GameType, BundleType, str],
         allocated_boards: int,
     ) -> AIGenerationResponse:
         """Directive 13: Tier 3 fallback - Cryptographically secure random generation via secrets."""
-        from app.schemas.enums import GAME_RULES
-        rules = GAME_RULES.get(game_type, {})
+        raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
+        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            rules = BUNDLE_RULES.get(BundleType(raw_key), {})
+        else:
+            rules = GAME_RULES.get(game_type, {})
         main_count = rules.get("main_numbers_count", 6)
         main_min = rules.get("main_number_min", 1)
         main_max = rules.get("main_number_max", 52)

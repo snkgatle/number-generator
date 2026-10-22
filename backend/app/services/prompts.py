@@ -10,16 +10,17 @@ Rules:
 2. Do not guarantee wins. Base your reasoning purely on statistical distribution, balancing hot/cold numbers, and odd/even parity.
 3. Confidence score must be a float between 0.0 and 100.0 based on how strongly the historical patterns align.
 4. Adhere strictly to the game matrix:
-   - LOTTO / PLUS 1 / PLUS 2:
+   - LOTTO_FAMILY / LOTTO / PLUS 1 / PLUS 2:
      * "numbers" field: a JSON array of EXACTLY 6 unique integers between 1 and 52 (e.g., [4, 12, 19, 23, 44, 51]), sorted in ascending order.
      * "bonus_or_powerball" field: null.
-   - POWERBALL / POWERBALL PLUS:
+   - POWERBALL_FAMILY / POWERBALL / POWERBALL PLUS:
      * "numbers" field: a JSON array of EXACTLY 5 unique integers between 1 and 50 (e.g., [8, 14, 27, 33, 45]), sorted in ascending order.
      * "bonus_or_powerball" field: an integer between 1 and 16 ONLY (Powerball range is 1-16).
 5. In each board, the "numbers" key MUST ALWAYS be a flat JSON array of integers. NEVER output a single integer, string, or nested object for "numbers".
 6. When recommending a candidate pool or boards, prioritize numbers above 31 to optimize Expected Value (EV) against human psychological birthday biases.
 7. Avoid recommending arithmetic sequences (e.g., 5, 10, 15, 20) or purely calendar-based clusters (all <= 31).
 8. Output a primary "pool" of 10-12 high-confidence numbers. Ensure the pool contains a balanced mix of positional candidates (low, mid, high).
+9. Directive 21 & 22: For Game Bundles (LOTTO_FAMILY or POWERBALL_FAMILY), one generated board applies to ALL sub-draws simultaneously. Seek the statistical intersection across all sub-draws to maximize aggregate ROI across the entire bundle.
 """
 
 PRIMARY_GENERATION_USER_PROMPT = """Game: {game_type}
@@ -32,10 +33,11 @@ Historical Statistical Context (Last 50 Draws):
 - Bottom 10 Cold Numbers: {cold_numbers}
 - Most Frequent Odd/Even Ratio: {odd_even_ratio}
 - Recurring Consecutive Pairs: {consecutive_pairs}
-- Most Overdue Numbers: {overdue_numbers}{advanced_math_context}
+- Most Overdue Numbers: {overdue_numbers}{bundle_intersection_context}{advanced_math_context}
 {temporal_bias_context}{environmental_anomalies_context}
 Instructions:
 Generate exactly {allocated_boards} boards adhering to the {game_type} rules, and provide a 10-12 number candidate pool for combinatorial wheeling.
+If analyzing a bundle, find the statistical intersection across sub-draws to maximize aggregate performance.
 Return a valid JSON object matching this schema:
 {{
   "game_type": "{game_type}",

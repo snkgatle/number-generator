@@ -15,6 +15,7 @@ import {
   formatDate,
   formatZAR,
   gameLabel,
+  bundleLabel,
   isPowerBallGame,
   boardToText,
 } from '../utils/format';
@@ -88,26 +89,43 @@ export const ResultsView: React.FC = () => {
 
   // Metrics
   const totalCount = boards.length;
-  const wonBoards = boards.filter((b) => b.status === 'WON' || Number(b.result?.prize_amount ?? 0) > 0);
+  const wonBoards = boards.filter((b) => {
+    const prize = Number(b.total_prize ?? (b.result?.prize_amount ?? 0));
+    return b.status === 'WON' || prize > 0;
+  });
   const lostBoards = boards.filter((b) => b.status === 'LOST');
-  const pendingBoards = boards.filter((b) => b.status === 'PENDING' && !b.result);
+  const pendingBoards = boards.filter(
+    (b) => b.status === 'PENDING' && (!b.results || b.results.length === 0) && !b.result
+  );
 
   const evaluatedCount = wonBoards.length + lostBoards.length;
-  const totalCost = boards.reduce((acc, b) => acc + Number(b.cost || 5), 0);
-  const totalWinnings = boards.reduce((acc, b) => acc + Number(b.result?.prize_amount || 0), 0);
+  const totalCost = boards.reduce((acc, b) => acc + Number(b.cost || 10), 0);
+  const totalWinnings = boards.reduce((acc, b) => {
+    if (b.total_prize !== undefined && b.total_prize !== null) {
+      return acc + Number(b.total_prize);
+    }
+    if (b.results && b.results.length > 0) {
+      return acc + b.results.reduce((sub, r) => sub + Number(r.prize_amount || 0), 0);
+    }
+    return acc + Number(b.result?.prize_amount || 0);
+  }, 0);
   const netPL = totalWinnings - totalCost;
   const netRoi = totalCost > 0 ? (netPL / totalCost) * 100 : 0;
   const hitRate = evaluatedCount > 0 ? (wonBoards.length / evaluatedCount) * 100 : 0;
 
   const filteredBoards = boards.filter((b) => {
-    if (statusFilter === 'WON') return b.status === 'WON' || Number(b.result?.prize_amount ?? 0) > 0;
-    if (statusFilter === 'LOST') return b.status === 'LOST';
-    if (statusFilter === 'PENDING') return b.status === 'PENDING' && !b.result;
+    const prize = Number(b.total_prize ?? (b.result?.prize_amount ?? 0));
+    const hasResults = Boolean((b.results && b.results.length > 0) || b.result);
+    if (statusFilter === 'WON') return b.status === 'WON' || prize > 0;
+    if (statusFilter === 'LOST') return b.status === 'LOST' || (hasResults && prize === 0);
+    if (statusFilter === 'PENDING') return b.status === 'PENDING' && !hasResults;
     return true;
   });
 
   const gameFilterOptions = [
-    { value: 'ALL', label: 'All games' },
+    { value: 'ALL', label: 'All bundles & games' },
+    { value: 'LOTTO_FAMILY', label: 'Lotto Bundle' },
+    { value: 'POWERBALL_FAMILY', label: 'PowerBall Bundle' },
     ...GAMES.map((g) => ({ value: g.id, label: g.label })),
   ];
 
@@ -214,23 +232,35 @@ export const ResultsView: React.FC = () => {
                 (d.game_type === board.game_type && d.draw_date === board.target_draw_date)
             );
 
-            const isPowerBall = isPowerBallGame(board.game_type);
-            const prizeAmount = Number(board.result?.prize_amount || 0);
-            const isWinner = board.status === 'WON' || prizeAmount > 0;
-            const isEvaluated = Boolean(board.result);
+            const isPowerBall = isPowerBallGame(board.bundle_name || board.game_type);
+            const totalPrize = Number(
+              board.total_prize ??
+              (board.results && board.results.length > 0
+                ? board.results.reduce((s, r) => s + Number(r.prize_amount || 0), 0)
+                : board.result?.prize_amount || 0)
+            );
+            const isWinner = board.status === 'WON' || totalPrize > 0;
+            const hasMultiResults = Boolean(board.results && board.results.length > 0);
+            const isEvaluated = hasMultiResults || Boolean(board.result);
 
             const matchedSet = new Set<number>(
-              board.result?.matched_numbers ||
-                (matchingDraw ? board.numbers.filter((n) => matchingDraw.numbers.includes(n)) : [])
+              board.results && board.results.length > 0
+                ? board.results.flatMap((r) => r.matched_numbers || [])
+                : board.result?.matched_numbers ||
+                  (matchingDraw ? board.numbers.filter((n) => matchingDraw.numbers.includes(n)) : [])
             );
 
             const matchedBonus =
-              board.result?.matched_bonus ??
-              (matchingDraw && board.bonus_or_powerball !== null && board.bonus_or_powerball !== undefined
-                ? isPowerBall
-                  ? matchingDraw.powerball === board.bonus_or_powerball
-                  : matchingDraw.bonus_ball === board.bonus_or_powerball
-                : false);
+              board.results && board.results.length > 0
+                ? board.results.some((r) => r.matched_bonus)
+                : (board.result?.matched_bonus ??
+                  (matchingDraw && board.bonus_or_powerball !== null && board.bonus_or_powerball !== undefined
+                    ? isPowerBall
+                      ? matchingDraw.powerball === board.bonus_or_powerball
+                      : matchingDraw.bonus_ball === board.bonus_or_powerball
+                    : false));
+
+            const displayLabel = bundleLabel(board.bundle_name || board.game_type);
 
             return (
               <div key={board.id} className="card card-body space-y-4">
@@ -238,7 +268,7 @@ export const ResultsView: React.FC = () => {
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="badge badge-neutral num">Board #{board.id}</span>
-                    <span className="text-sm font-semibold text-zinc-100">{gameLabel(board.game_type)}</span>
+                    <span className="text-sm font-semibold text-zinc-100">{displayLabel}</span>
                     <span className="text-xs text-zinc-500">Draw: {formatDate(board.target_draw_date)}</span>
                     <span className="text-xs text-zinc-500 font-mono">
                       Conf: {board.confidence_score.toFixed(1)}%
@@ -270,8 +300,60 @@ export const ResultsView: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Prize Breakdown Banner if evaluated */}
-                {board.result && (
+                {/* Multi-Draw Prize Breakdown Banner if evaluated across sub-draws */}
+                {hasMultiResults && board.results ? (
+                  <div
+                    className={`space-y-2 rounded-md border p-3 text-xs font-mono ${
+                      isWinner
+                        ? 'border-emerald-500/30 bg-emerald-500/[0.06] text-emerald-300'
+                        : 'border-line bg-surface-1 text-zinc-400'
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line/40 pb-2">
+                      <div className="flex items-center gap-2">
+                        <Trophy className={`h-4 w-4 ${isWinner ? 'text-amber-400' : 'text-zinc-600'}`} />
+                        <span>
+                          <strong className={isWinner ? 'text-emerald-200' : 'text-zinc-300'}>
+                            {isWinner ? 'Multi-Draw Winning Board' : 'No Sub-Draw Prize'}
+                          </strong>{' '}
+                          · Combined outcome across bundle plays
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span>
+                          Total Payout:{' '}
+                          <strong className={`text-sm ${isWinner ? 'text-emerald-300' : 'text-zinc-400'}`}>
+                            {formatZAR(totalPrize)}
+                          </strong>
+                        </span>
+                        <span className="text-zinc-500">(Cost: {formatZAR(board.cost || 10)})</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                      {board.results.map((r) => {
+                        const rWon = Number(r.prize_amount || 0) > 0;
+                        return (
+                          <div
+                            key={r.id || r.game_type}
+                            className="rounded bg-surface-2/60 px-2.5 py-1.5 flex items-center justify-between text-2xs"
+                          >
+                            <div>
+                              <span className="font-semibold text-zinc-300">{gameLabel(r.game_type || '')}</span>
+                              <div className="text-zinc-500">
+                                {r.matched_count} match{r.matched_bonus ? ' + PB' : ''}
+                                {r.division ? ` · ${r.division}` : ''}
+                              </div>
+                            </div>
+                            <span className={`font-semibold ${rWon ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                              {formatZAR(r.prize_amount)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ) : board.result ? (
                   <div
                     className={`flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs font-mono ${
                       isWinner
@@ -294,13 +376,13 @@ export const ResultsView: React.FC = () => {
                       <span>
                         Payout:{' '}
                         <strong className={`text-sm ${isWinner ? 'text-emerald-300' : 'text-zinc-400'}`}>
-                          {formatZAR(prizeAmount)}
+                          {formatZAR(totalPrize)}
                         </strong>
                       </span>
-                      <span className="text-zinc-500">(Cost: {formatZAR(board.cost || 5)})</span>
+                      <span className="text-zinc-500">(Cost: {formatZAR(board.cost || 10)})</span>
                     </div>
                   </div>
-                )}
+                ) : null}
 
                 {/* Numbers Grid: Predicted vs Actual */}
                 <div className="grid grid-cols-1 gap-4 pt-3 border-t border-line/60 md:grid-cols-2">

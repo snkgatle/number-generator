@@ -17,8 +17,9 @@ from app.budget.engine import BudgetEngine, BudgetExhaustedException
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.models.board import BoardResult, GeneratedBoard
+from app.models.bundle import GameBundle
 from app.models.draw import Draw
-from app.schemas.enums import BoardStatus, GameType
+from app.schemas.enums import BUNDLE_GAMES, BoardStatus, BundleType, GameType
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
 from app.services.dedup_service import DedupService
@@ -27,12 +28,15 @@ from app.services.prize_service import PrizeService
 from app.services.scraper_service import ScraperService
 from app.services.stats_service import StatsService
 
-SCHEDULED_GAMES_BY_WEEKDAY = {
-    1: [GameType.POWERBALL, GameType.POWERBALL_PLUS],             # Tuesday
-    2: [GameType.LOTTO, GameType.LOTTO_PLUS_1, GameType.LOTTO_PLUS_2],  # Wednesday
-    4: [GameType.POWERBALL, GameType.POWERBALL_PLUS],             # Friday
-    5: [GameType.LOTTO, GameType.LOTTO_PLUS_1, GameType.LOTTO_PLUS_2],  # Saturday
+# Directive 21: Group into Game Bundles (one board plays all sub-draws)
+SCHEDULED_BUNDLES_BY_WEEKDAY = {
+    1: [BundleType.POWERBALL_FAMILY],  # Tuesday: PowerBall + PowerBall Plus
+    2: [BundleType.LOTTO_FAMILY],      # Wednesday: Lotto + Plus 1 + Plus 2
+    4: [BundleType.POWERBALL_FAMILY],  # Friday: PowerBall + PowerBall Plus
+    5: [BundleType.LOTTO_FAMILY],      # Saturday: Lotto + Plus 1 + Plus 2
 }
+
+SCHEDULED_GAMES_BY_WEEKDAY = SCHEDULED_BUNDLES_BY_WEEKDAY
 
 
 class PipelineOrchestrator:
@@ -50,11 +54,15 @@ class PipelineOrchestrator:
         self.notifier = Notifier()
 
     @staticmethod
-    def get_scheduled_games_for_date(ref_date: Optional[date] = None) -> List[GameType]:
-        """Identifies which lottery games have draws on the specified date."""
+    def get_scheduled_games_for_date(ref_date: Optional[date] = None) -> List[BundleType]:
+        """Identifies which lottery bundles have draws on the specified date."""
         d = ref_date or date.today()
         weekday = d.weekday()
-        return SCHEDULED_GAMES_BY_WEEKDAY.get(weekday, [])
+        return SCHEDULED_BUNDLES_BY_WEEKDAY.get(weekday, [])
+
+    @staticmethod
+    def get_scheduled_bundles_for_date(ref_date: Optional[date] = None) -> List[BundleType]:
+        return PipelineOrchestrator.get_scheduled_games_for_date(ref_date)
 
     async def execute_pre_draw_pipeline(
         self,
@@ -74,21 +82,34 @@ class PipelineOrchestrator:
     async def _run_pre_draw(
         self,
         db: AsyncSession,
-        game_types: Optional[List[GameType]] = None,
+        game_types: Optional[List[Any]] = None,
         target_date: Optional[date] = None,
     ) -> Dict[str, Any]:
         ref_date = target_date or date.today()
-        games = game_types or self.get_scheduled_games_for_date(ref_date)
+        raw_items = game_types or self.get_scheduled_bundles_for_date(ref_date)
 
-        if not games:
-            logger.info(f"No lottery draws scheduled for {ref_date} (weekday={ref_date.weekday()}).")
+        # Resolve to distinct BundleTypes
+        bundles: List[BundleType] = []
+        for it in raw_items:
+            s = it.value if hasattr(it, "value") else str(it)
+            if s in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+                b = BundleType(s)
+            elif "POWERBALL" in s:
+                b = BundleType.POWERBALL_FAMILY
+            else:
+                b = BundleType.LOTTO_FAMILY
+            if b not in bundles:
+                bundles.append(b)
+
+        if not bundles:
+            logger.info(f"No lottery bundles scheduled for {ref_date} (weekday={ref_date.weekday()}).")
             return {
                 "status": "SKIPPED",
                 "message": f"No draws scheduled for {ref_date}.",
                 "generated_boards_count": 0,
             }
 
-        logger.info(f"Starting Pre-Draw Pipeline for {len(games)} games on {ref_date}: {[g.value for g in games]}")
+        logger.info(f"Starting Pre-Draw Pipeline for {len(bundles)} bundles on {ref_date}: {[b.value for b in bundles]}")
 
         total_generated = 0
         results_by_game = {}
@@ -110,78 +131,82 @@ class PipelineOrchestrator:
                 "generated_boards_count": 0,
             }
 
-        # 2. Iterate each scheduled game
-        for game in games:
+        # 2. Iterate each scheduled bundle
+        for bundle in bundles:
             if budget.remaining_boards <= 0:
-                logger.warning("Monthly budget exhausted mid-pipeline. Halting subsequent games.")
+                logger.warning("Monthly budget exhausted mid-pipeline. Halting subsequent bundles.")
                 break
 
-            logger.info(f"Processing pre-draw analysis for {game.value}...")
+            logger.info(f"Processing pre-draw analysis for bundle {bundle.value}...")
 
-            # Statistical Pre-Processing (Phase 3 & 3.7)
-            recent_draws = await self.stats_service.get_recent_draws(db, game, limit=50)
-            stats = await self.stats_service.get_stats_for_game(db, game, sample_size=50)
-            stats_vars = self.stats_service.format_prompt_variables(stats, draws=recent_draws)
+            # Directive 21 & 22: Multi-draw Statistical Pre-Processing across all sub-draws in bundle
+            bundle_data = await self.stats_service.get_stats_for_bundle(db, bundle, sample_size=50)
+            stats_vars = self.stats_service.format_bundle_prompt_variables(bundle_data)
 
-            # Determine board allocation using confidence engine (Phase 5)
+            # Determine board allocation using confidence engine (Phase 1.5: threshold > 90%)
             allocation = await self.budget_engine.calculate_confidence_allocation(
-                db, game_type=game, target_date=ref_date
+                db, game_type=bundle.value, target_date=ref_date
             )
             boards_to_generate = allocation.total_allocated
 
             if boards_to_generate <= 0:
-                logger.info(f"Allocation for {game.value} is 0 boards. Skipping.")
+                logger.info(f"Allocation for {bundle.value} is 0 boards. Skipping.")
                 continue
 
-            # Directive 16: Check environmental correlations with Chi-Square (p < 0.05 only)
-            env_report = self.stats_service.calculate_environmental_correlations(recent_draws)
+            # Directive 16: Check environmental correlations across bundle draws (p < 0.05 only)
+            env_report = self.stats_service.calculate_environmental_correlations(bundle_data["all_draws"])
             env_anomalies = env_report.llm_prompt_summary if env_report.has_significant_anomalies else None
 
             # Directive 11: Fetch actionable temporal bias if available
-            temporal_bias = await self.analytics_service.get_latest_actionable_bias(db, game)
+            temporal_bias = await self.analytics_service.get_latest_actionable_bias(db, bundle.value)
 
-            # Generate Boards via Qwen-Max (Phase 4, 3.5, 3.6) with Monte Carlo stress test
+            # Generate Boards via Qwen-Max with aggregate bundle intersection optimization
             try:
                 ai_response = await self.ai_service.generate_boards(
-                    game_type=game,
+                    game_type=bundle.value,
                     target_draw_date=ref_date,
                     allocated_boards=boards_to_generate,
                     stats_context=stats_vars,
                     temporal_bias=temporal_bias,
                     environmental_anomalies=env_anomalies,
-                    historical_draws=recent_draws,
+                    historical_draws=bundle_data["all_draws"],
                 )
             except AIServiceError as err:
-                logger.error(f"AI generation failed for {game.value}: {err}. Skipping game.")
-                results_by_game[game.value] = {"error": str(err)}
+                logger.error(f"AI generation failed for {bundle.value}: {err}. Skipping bundle.")
+                results_by_game[bundle.value] = {"error": str(err)}
                 continue
 
             # Directive 12: Deduplicate candidate boards against batch and database
             unique_boards, collisions = await self.dedup_service.deduplicate_boards(
                 db=db,
                 candidate_boards=ai_response.boards,
-                game_type=game,
+                game_type=bundle.value,
                 target_date=ref_date,
             )
 
             if not unique_boards:
                 logger.warning(
-                    f"All candidate boards for {game.value} were filtered as duplicates ({collisions} collisions). Skipping."
+                    f"All candidate boards for {bundle.value} were filtered as duplicates ({collisions} collisions). Skipping."
                 )
-                results_by_game[game.value] = {
+                results_by_game[bundle.value] = {
                     "boards_count": 0,
                     "duplicates_filtered": collisions,
                 }
                 continue
 
-            # Persist Boards
-            created_for_game: List[GeneratedBoard] = []
-            cost_per_board = budget.cost_per_board
+            # Resolve bundle entity from DB
+            b_query = select(GameBundle).where(GameBundle.bundle_name == bundle.value)
+            b_res = await db.execute(b_query)
+            bundle_entity = b_res.scalar_one_or_none()
+            cost_per_board = bundle_entity.total_cost_per_board if bundle_entity else budget.cost_per_board
 
+            # Persist Boards
+            created_for_bundle: List[GeneratedBoard] = []
             for rec in unique_boards:
                 board = GeneratedBoard(
+                    bundle_id=bundle_entity.id if bundle_entity else None,
                     budget_id=budget.id,
-                    game_type=game.value,
+                    bundle_name=bundle.value,
                     target_draw_date=ref_date,
                     numbers=rec.numbers,
                     bonus_or_powerball=rec.bonus_or_powerball,
@@ -191,23 +216,23 @@ class PipelineOrchestrator:
                     status=BoardStatus.PENDING.value,
                 )
                 db.add(board)
-                created_for_game.append(board)
+                created_for_bundle.append(board)
 
             await db.commit()
 
             # Deduct quota from monthly budget
-            if created_for_game:
+            if created_for_bundle:
                 budget = await self.budget_engine.record_board_allocation(
-                    db, boards_count=len(created_for_game)
+                    db, boards_count=len(created_for_bundle)
                 )
-                total_generated += len(created_for_game)
-                results_by_game[game.value] = {
-                    "boards_count": len(created_for_game),
-                    "confidence_scores": [b.confidence_score for b in created_for_game],
+                total_generated += len(created_for_bundle)
+                results_by_game[bundle.value] = {
+                    "boards_count": len(created_for_bundle),
+                    "confidence_scores": [b.confidence_score for b in created_for_bundle],
                 }
 
         logger.info(
-            f"Pre-Draw Pipeline completed: {total_generated} boards generated across {len(results_by_game)} games. "
+            f"Pre-Draw Pipeline completed: {total_generated} boards generated across {len(results_by_game)} bundles. "
             f"Remaining budget boards: {budget.remaining_boards}."
         )
 
@@ -250,46 +275,61 @@ class PipelineOrchestrator:
         logger.info(f"Found {len(pending_boards)} pending generated boards to evaluate.")
 
         for board in pending_boards:
-            # Match the first completed official draw occurring on or after target_draw_date
-            draw_query = (
+            b_name = board.bundle_name or "LOTTO_FAMILY"
+            try:
+                b_type = BundleType(b_name)
+            except ValueError:
+                b_type = BundleType.LOTTO_FAMILY
+            member_games = [g.value for g in BUNDLE_GAMES.get(b_type, [])]
+
+            # Fetch matching official draws for member sub-games
+            draws_query = (
                 select(Draw)
                 .where(
-                    Draw.game_type == board.game_type,
+                    Draw.game_type.in_(member_games),
                     Draw.draw_date >= board.target_draw_date,
                 )
                 .order_by(Draw.draw_date.asc(), Draw.draw_number.asc())
-                .limit(1)
             )
-            draw_res = await db.execute(draw_query)
-            draw = draw_res.scalar_one_or_none()
+            draws_res = await db.execute(draws_query)
+            matching_draws = list(draws_res.scalars().all())
 
-            if not draw:
+            if not matching_draws:
                 continue
 
-            # Directive 14: Evaluate against official SA prize tier matrix
-            evaluation = self.prize_service.evaluate_board(
-                game_type=GameType(board.game_type),
+            matching_date = matching_draws[0].draw_date
+            matching_draws = [d for d in matching_draws if d.draw_date == matching_date]
+
+            # Directive 24: Multi-Draw ROI Evaluation - evaluate board against all sub-draws
+            bundle_eval = self.prize_service.evaluate_board_against_bundle_draws(
                 board_numbers=board.numbers,
                 board_special=board.bonus_or_powerball,
-                winning_numbers=draw.numbers,
-                winning_bonus=draw.bonus_ball,
-                winning_powerball=draw.powerball,
-                cost_per_board=board.cost or Decimal(str(settings.COST_PER_BOARD)),
-            )
-
-            board.status = BoardStatus.WON.value if evaluation.is_winner else BoardStatus.LOST.value
-            board.draw_id = draw.id
-
-            result_entity = BoardResult(
+                draws=matching_draws,
+                bundle_name=b_name,
+                cost_per_board=board.cost or Decimal("10.00"),
                 board_id=board.id,
-                draw_id=draw.id,
-                matched_numbers=evaluation.matched_numbers,
-                matched_count=evaluation.matched_count,
-                matched_bonus=evaluation.matched_bonus,
-                division=evaluation.division,
-                prize_amount=evaluation.prize_amount,
             )
-            db.add(result_entity)
+
+            board.status = BoardStatus.WON.value if bundle_eval.is_winner else BoardStatus.LOST.value
+            board.draw_id = matching_draws[0].id
+
+            for draw in matching_draws:
+                sub_eval = bundle_eval.sub_evaluations.get(draw.game_type)
+                if not sub_eval:
+                    continue
+                result_entity = BoardResult(
+                    board_id=board.id,
+                    draw_id=draw.id,
+                    game_type=draw.game_type,
+                    matched_numbers=sub_eval.matched_numbers,
+                    matched_count=sub_eval.matched_count,
+                    matched_bonus=sub_eval.matched_bonus,
+                    division=sub_eval.division,
+                    prize_amount=sub_eval.prize_amount,
+                )
+                db.add(result_entity)
+                total_evaluated += 1
+                evaluated_draw_ids.add(draw.id)
             total_evaluated += 1
             evaluated_draw_ids.add(draw.id)
 

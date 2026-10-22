@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import (
     Date,
     DateTime,
+    ForeignKey,
     Integer,
     JSON,
     String,
@@ -37,6 +38,12 @@ class Draw(Base):
     ball_set: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     draw_time: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    bundle_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("game_bundles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -44,6 +51,7 @@ class Draw(Base):
     )
 
     # Relationships
+    bundle = relationship("GameBundle", back_populates="draws", lazy="selectin")
     generated_boards = relationship("GeneratedBoard", back_populates="draw", lazy="selectin")
     results = relationship("BoardResult", back_populates="draw", cascade="all, delete-orphan", lazy="selectin")
 

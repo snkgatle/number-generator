@@ -10,19 +10,19 @@ async def test_circuit_breaker_deduction_and_exhaustion(db_session):
 
     # 1. Initialize budget
     budget = await budget_service.get_or_create_monthly_budget(db_session)
-    assert budget.remaining_boards == 40
+    assert budget.remaining_boards == 20
     assert budget.used_boards == 0
 
-    # 2. Consume 39 boards
-    budget = await budget_service.record_board_usage(db_session, boards_used=39)
+    # 2. Consume 19 boards
+    budget = await budget_service.record_board_usage(db_session, boards_used=19)
     assert budget.remaining_boards == 1
-    assert budget.used_boards == 39
+    assert budget.used_boards == 19
     assert budget.is_exhausted is False
 
     # 3. Consume the final board
     budget = await budget_service.record_board_usage(db_session, boards_used=1)
     assert budget.remaining_boards == 0
-    assert budget.used_boards == 40
+    assert budget.used_boards == 20
     assert budget.is_exhausted is True
 
     # 4. Attempting to consume or verify further boards must raise BudgetExhaustedException

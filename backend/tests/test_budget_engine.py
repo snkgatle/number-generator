@@ -21,9 +21,9 @@ async def test_monthly_budget_initialization(budget_engine, db_session):
 
     assert budget.year_month == current_ym
     assert budget.total_budget == Decimal("200.00")
-    assert budget.cost_per_board == Decimal("5.00")
-    assert budget.total_boards == 40
-    assert budget.remaining_boards == 40
+    assert budget.cost_per_board == Decimal("10.00")
+    assert budget.total_boards == 20
+    assert budget.remaining_boards == 20
     assert budget.used_boards == 0
     assert budget.spent_amount == Decimal("0.00")
     assert budget.is_exhausted is False
@@ -75,7 +75,7 @@ async def test_confidence_allocation_baseline(budget_engine, db_session):
 async def test_confidence_allocation_bonus(budget_engine, db_session):
     """Verify bonus board allocation (+1 board) when confidence >= 85% and budget allows."""
     rec = await budget_engine.calculate_confidence_allocation(
-        db_session, game_type=GameType.POWERBALL, target_date=date(2026, 10, 20), confidence_score=88.5
+        db_session, game_type=GameType.POWERBALL, target_date=date(2026, 10, 20), confidence_score=92.5
     )
     assert rec.base_boards == 1
     assert rec.bonus_boards == 1
@@ -114,18 +114,18 @@ async def test_confidence_allocation_quota_capped(budget_engine, db_session):
 async def test_record_board_allocation(budget_engine, db_session):
     """Verify atomic quota deduction and circuit breaker tripping on exhaustion."""
     budget = await budget_engine.get_or_create_monthly_budget(db_session, year_month="2027-01")
-    assert budget.remaining_boards == 40
+    assert budget.remaining_boards == 20
 
     # Allocate 5 boards
     updated = await budget_engine.record_board_allocation(db_session, boards_count=5, year_month="2027-01")
     assert updated.used_boards == 5
-    assert updated.remaining_boards == 35
-    assert updated.spent_amount == Decimal("25.00")
+    assert updated.remaining_boards == 15
+    assert updated.spent_amount == Decimal("50.00")
     assert updated.is_exhausted is False
 
-    # Allocate remaining 35 boards -> trips circuit breaker
-    exhausted = await budget_engine.record_board_allocation(db_session, boards_count=35, year_month="2027-01")
-    assert exhausted.used_boards == 40
+    # Allocate remaining 15 boards -> trips circuit breaker
+    exhausted = await budget_engine.record_board_allocation(db_session, boards_count=15, year_month="2027-01")
+    assert exhausted.used_boards == 20
     assert exhausted.remaining_boards == 0
     assert exhausted.spent_amount == Decimal("200.00")
     assert exhausted.is_exhausted is True
@@ -139,8 +139,8 @@ async def test_allocation_plan_endpoint(client, db_session):
     data = res.json()
     assert "year_month" in data
     assert float(data["total_budget_zar"]) == 200.0
-    assert data["total_boards"] == 40
-    assert data["confidence_threshold"] == 85.0
+    assert data["total_boards"] == 20
+    assert data["confidence_threshold"] == 90.0
     assert len(data["recommendations"]) >= 2
 
 

@@ -55,6 +55,13 @@ class GeneratedBoard(Base):
         index=True,
         comment="Bundle identifier: 'LOTTO_FAMILY' or 'POWERBALL_FAMILY'",
     )
+    game_type: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        default="",
+        index=True,
+        comment="Legacy game_type column, mapped to bundle_name for backward compatibility",
+    )
     target_draw_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     numbers: Mapped[List[int]] = mapped_column(JSON, nullable=False)
     bonus_or_powerball: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -94,14 +101,16 @@ class GeneratedBoard(Base):
         lazy="selectin",
     )
 
-    @property
-    def game_type(self) -> str:
-        """Compatibility property mapping game_type to bundle_name."""
-        return self.bundle_name
 
-    @game_type.setter
-    def game_type(self, val: str) -> None:
-        self.bundle_name = val
+    def __init__(self, **kwargs):
+        if "bundle_name" in kwargs and "game_type" not in kwargs:
+            kwargs["game_type"] = kwargs["bundle_name"]
+        elif "game_type" in kwargs and "bundle_name" not in kwargs:
+            kwargs["bundle_name"] = kwargs["game_type"]
+        elif "bundle_name" not in kwargs and "game_type" not in kwargs:
+            kwargs["bundle_name"] = "LOTTO_FAMILY"
+            kwargs["game_type"] = "LOTTO_FAMILY"
+        super().__init__(**kwargs)
 
     @property
     def result(self) -> Optional["BoardResult"]:

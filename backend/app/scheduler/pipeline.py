@@ -207,6 +207,7 @@ class PipelineOrchestrator:
                     bundle_id=bundle_entity.id if bundle_entity else None,
                     budget_id=budget.id,
                     bundle_name=bundle.value,
+                    game_type=bundle.value,
                     target_draw_date=ref_date,
                     numbers=rec.numbers,
                     bonus_or_powerball=rec.bonus_or_powerball,

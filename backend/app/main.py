@@ -66,14 +66,21 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Centralized exception handler to guarantee standard JSON error envelopes."""
+    """Centralized exception handler to guarantee standard JSON error envelopes and CORS headers."""
     logger.error(f"Unhandled server error on {request.method} {request.url.path}: {exc}")
+    headers = {}
+    origin = request.headers.get("origin")
+    if origin:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        headers["Vary"] = "Origin"
     return JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "detail": "An internal server error occurred.",
             "error_type": exc.__class__.__name__,
         },
+        headers=headers,
     )
 
 

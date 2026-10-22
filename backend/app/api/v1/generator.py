@@ -177,6 +177,7 @@ async def generate_boards(
             bundle_id=bundle_id,
             budget_id=budget.id,
             bundle_name=bundle_type.value,
+            game_type=bundle_type.value,
             target_draw_date=target_date,
             numbers=rec.numbers,
             bonus_or_powerball=rec.bonus_or_powerball,

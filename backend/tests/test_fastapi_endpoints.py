@@ -155,3 +155,38 @@ async def test_stats_ev_score_endpoint(client):
     assert "calendar_count" in data
 
 
+@pytest.mark.asyncio
+async def test_cors_headers_on_origin(client):
+    """Test CORS headers are returned for configured origin."""
+    response = await client.get(
+        "/api/v1/health",
+        headers={"Origin": "https://lotto-num-gen-33fe8.uc.r.appspot.com"},
+    )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "https://lotto-num-gen-33fe8.uc.r.appspot.com"
+    assert response.headers.get("access-control-allow-credentials") == "true"
+
+
+@pytest.mark.asyncio
+async def test_global_exception_handler_cors():
+    """Test unhandled 500 exceptions still return CORS headers for browser compatibility."""
+    from unittest.mock import patch
+    from httpx import ASGITransport, AsyncClient
+    from app.main import app
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        with patch("app.api.v1.api.check_db_connection", side_effect=RuntimeError("Simulated DB failure")):
+            response = await ac.get(
+                "/api/v1/health",
+                headers={"Origin": "https://lotto-num-gen-33fe8.uc.r.appspot.com"},
+            )
+            assert response.status_code == 500
+            assert response.headers.get("access-control-allow-origin") == "https://lotto-num-gen-33fe8.uc.r.appspot.com"
+            assert response.headers.get("access-control-allow-credentials") == "true"
+            data = response.json()
+            assert data["detail"] == "An internal server error occurred."
+            assert data["error_type"] == "RuntimeError"
+
+
+

@@ -49,3 +49,66 @@ When asked to build a feature, follow this order:
 3. Write Business Logic / Service layer.
 4. Expose via FastAPI Router.
 5. Write Unit Tests for the service layer.
+
+## Deployment Protocols (GCP Production)
+When asked to deploy or redeploy the application, follow these exact steps:
+
+### 1. Pre-Deployment Verification
+Always ensure tests pass and the frontend bundle compiles before initiating deployments:
+```bash
+# Run backend test suite (all tests must pass)
+backend/.venv/bin/pytest backend/tests
+
+# Compile production frontend bundle
+npm --prefix frontend run build
+```
+
+### 2. Backend Deployment (Google Cloud Run)
+Deploy the FastAPI backend to Cloud Run from the workspace root:
+```bash
+gcloud run deploy lottomind-backend \
+  --source ./backend \
+  --project lotto-num-gen-33fe8 \
+  --region us-central1 \
+  --allow-unauthenticated \
+  --memory 2Gi \
+  --cpu 1 \
+  --timeout 300s \
+  --quiet
+```
+- **Service Name:** `lottomind-backend`
+- **Region:** `us-central1`
+- **Project ID:** `lotto-num-gen-33fe8`
+- **Production URL:** `https://lottomind-backend-85438545053.us-central1.run.app`
+- **Health Check Verification:**
+  ```bash
+  curl -s https://lottomind-backend-85438545053.us-central1.run.app/api/v1/health
+  # Expected: {"status":"ok","project":"LottoMind","version":"0.1.0","environment":"production","database":"connected"}
+  ```
+
+### 3. Frontend Deployment (Google App Engine)
+Deploy the React + Vite static bundle to Google App Engine:
+```bash
+# Ensure frontend/dist exists and is up to date
+npm --prefix frontend run build
+
+# Deploy using the App Engine configuration
+gcloud app deploy --quiet --project=lotto-num-gen-33fe8 frontend/app.yaml
+```
+- **Target Service:** `default`
+- **Runtime:** `nodejs22` (configured in `frontend/app.yaml` routing `/` to `dist/index.html` and `/assets` to `dist/assets`)
+- **Project ID:** `lotto-num-gen-33fe8`
+- **Production URL:** `https://lotto-num-gen-33fe8.uc.r.appspot.com`
+- **Health Check Verification:**
+  ```bash
+  curl -sI https://lotto-num-gen-33fe8.uc.r.appspot.com
+  # Expected: HTTP/2 200
+  ```
+
+### 4. Local Deployment (Docker / Podman)
+For local testing or containerized verification:
+```bash
+docker compose up -d --build
+# Or with podman-compose:
+podman-compose up -d --build
+```

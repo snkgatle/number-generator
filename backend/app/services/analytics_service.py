@@ -2,7 +2,7 @@
 from datetime import date, timedelta
 import itertools
 import math
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.analytics import TemporalAnalytics
 from app.models.draw import Draw
 from app.schemas.analytics import TemporalMetrics, TemporalPatternReviewResponse
-from app.schemas.enums import GameType
+from app.schemas.enums import BundleType, GameType
 from app.services.ai_service import AIService
 
 
@@ -239,13 +239,14 @@ class TemporalAnalyticsService:
         return record
 
     async def get_latest_actionable_bias(
-        self, db: AsyncSession, game_type: GameType
+        self, db: AsyncSession, game_type: Union[GameType, BundleType, str]
     ) -> Optional[Dict[str, Any]]:
         """Retrieves the latest actionable bias for generation injection."""
+        raw_val = game_type.value if hasattr(game_type, "value") else str(game_type)
         query = (
             select(TemporalAnalytics)
             .where(
-                TemporalAnalytics.game_type == game_type.value,
+                TemporalAnalytics.game_type == raw_val,
                 TemporalAnalytics.actionable_bias_for_generation.isnot(None),
             )
             .order_by(TemporalAnalytics.analysis_date.desc(), TemporalAnalytics.id.desc())

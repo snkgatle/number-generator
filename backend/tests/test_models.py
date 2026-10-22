@@ -165,3 +165,70 @@ async def test_temporal_analytics_model(db_session):
     assert analytics.co_occurrence_matrix["7-22"] == 3
     assert analytics.actionable_bias_for_generation["suggested_sum_range"] == [130, 160]
     assert "clustering" in analytics.ai_insights
+
+
+@pytest.mark.asyncio
+async def test_game_bundle_model_and_multi_results(db_session):
+    """Directive 21 & 24: Test GameBundle model, 1-to-many BoardResult relationship, and total_prize property."""
+    from app.models.bundle import GameBundle
+
+    # 1. Create GameBundle
+    bundle = GameBundle(
+        bundle_name="LOTTO_FAMILY",
+        main_matrix_rule="6/52",
+        addon_matrix_rule="1/52 Bonus Ball",
+        total_cost_per_board=Decimal("10.00"),
+    )
+    db_session.add(bundle)
+    await db_session.commit()
+    await db_session.refresh(bundle)
+    assert bundle.id is not None
+    assert bundle.total_cost_per_board == Decimal("10.00")
+
+    # 2. Create GeneratedBoard linked to bundle
+    board = GeneratedBoard(
+        bundle_id=bundle.id,
+        bundle_name="LOTTO_FAMILY",
+        target_draw_date=date(2026, 10, 21),
+        numbers=[3, 15, 22, 31, 40, 52],
+        confidence_score=91.5,
+        cost=Decimal("10.00"),
+        status="PENDING",
+    )
+    db_session.add(board)
+    await db_session.commit()
+    await db_session.refresh(board)
+    assert board.bundle_id == bundle.id
+
+    # 3. Create Draws for 2 sub-games on same date
+    draw1 = Draw(draw_number=201, game_type="LOTTO", draw_date=date(2026, 10, 21), numbers=[3, 15, 22, 1, 2, 4])
+    draw2 = Draw(draw_number=202, game_type="LOTTO_PLUS_1", draw_date=date(2026, 10, 21), numbers=[3, 15, 22, 31, 40, 52])
+    db_session.add_all([draw1, draw2])
+    await db_session.commit()
+
+    # 4. Create multiple BoardResults for the single board (Directive 24)
+    res1 = BoardResult(
+        board_id=board.id,
+        draw_id=draw1.id,
+        game_type="LOTTO",
+        matched_numbers=[3, 15, 22],
+        matched_count=3,
+        matched_bonus=False,
+        prize_amount=Decimal("50.00"),
+    )
+    res2 = BoardResult(
+        board_id=board.id,
+        draw_id=draw2.id,
+        game_type="LOTTO_PLUS_1",
+        matched_numbers=[3, 15, 22, 31, 40, 52],
+        matched_count=6,
+        matched_bonus=False,
+        prize_amount=Decimal("3500000.00"),
+    )
+    db_session.add_all([res1, res2])
+    await db_session.commit()
+    await db_session.refresh(board)
+
+    # 5. Verify 1-to-many relationship and total_prize property
+    assert len(board.results) == 2
+    assert board.total_prize == Decimal("3500050.00")

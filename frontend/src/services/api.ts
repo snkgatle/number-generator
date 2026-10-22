@@ -38,8 +38,10 @@ export interface Draw {
 
 export interface GeneratedBoard {
   id: number;
+  bundle_id?: number | null;
   budget_id?: number | null;
   draw_id?: number | null;
+  bundle_name?: string;
   game_type: string;
   target_draw_date: string;
   numbers: number[];
@@ -49,7 +51,9 @@ export interface GeneratedBoard {
   status: string;
   cost: number;
   created_at: string;
+  results?: BoardResult[];
   result?: BoardResult | null;
+  total_prize?: number;
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
@@ -150,12 +154,18 @@ export interface PostDrawFeedback {
   calibration_recommendations: string[];
 }
 
-export async function generateBoards(gameType: string, allocatedBoards = 1, targetDrawDate?: string): Promise<GeneratedBoard[]> {
+export async function generateBoards(
+  gameTypeOrBundle: string,
+  allocatedBoards = 1,
+  targetDrawDate?: string
+): Promise<GeneratedBoard[]> {
+  const isBundle = gameTypeOrBundle.includes('FAMILY');
   const response = await fetch(`${API_BASE_URL}/generator/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      game_type: gameType,
+      bundle_name: isBundle ? gameTypeOrBundle : undefined,
+      game_type: gameTypeOrBundle,
       allocated_boards: allocatedBoards,
       target_draw_date: targetDrawDate,
     }),
@@ -171,6 +181,7 @@ export interface BoardResult {
   id: number;
   board_id: number;
   draw_id: number;
+  game_type?: string;
   matched_numbers: number[];
   matched_count: number;
   matched_bonus: boolean;
@@ -180,7 +191,9 @@ export interface BoardResult {
 }
 
 export interface BoardWithResult extends GeneratedBoard {
+  results?: BoardResult[];
   result?: BoardResult | null;
+  total_prize?: number;
 }
 
 export interface CircuitBreakerStatus {
@@ -219,10 +232,17 @@ export interface AllocationPlan {
   recommendations: BoardAllocationRecommendation[];
 }
 
-export async function fetchGeneratedBoards(gameType?: string, limit = 50): Promise<BoardWithResult[]> {
-  const url = gameType
-    ? `${API_BASE_URL}/generator/boards?limit=${limit}&game_type=${gameType}`
-    : `${API_BASE_URL}/generator/boards?limit=${limit}`;
+export async function fetchGeneratedBoards(
+  gameType?: string,
+  limit = 50,
+  bundleName?: string
+): Promise<BoardWithResult[]> {
+  let url = `${API_BASE_URL}/generator/boards?limit=${limit}`;
+  if (bundleName) {
+    url += `&bundle_name=${bundleName}`;
+  } else if (gameType) {
+    url += `&game_type=${gameType}`;
+  }
   const response = await fetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch boards: ${response.statusText}`);

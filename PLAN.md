@@ -9,6 +9,14 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 - [x] Implement Alembic for database migrations.
 - [x] Create Pydantic schemas for all models.
 
+## Phase 1.5: Game Bundle Architecture
+- [x] Create `game_bundles` table and map all draws to their respective bundles.
+- [x] Refactor `budget_service.py` to calculate board limits based on bundle cost (R10/board = 20 boards/month).
+- [x] Raise the confidence threshold for bonus board allocation to > 90% due to higher board cost.
+- [x] Update `stats_service.py` to aggregate historical data per bundle rather than per individual game.
+- [x] Refactor `ai_service.py` and `prompts.py` to send multi-draw stats to Qwen and request aggregate optimization.
+- [x] Update `prize_service.py` to evaluate one generated board against multiple actual draw results and sum the ZAR ROI.
+
 ## Phase 2: The Scraper Engine
 - [x] Install and configure Playwright.
 - [x] Write scraping logic targeting the SA National Lottery results page.

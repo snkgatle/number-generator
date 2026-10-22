@@ -10,10 +10,48 @@ export const GAMES = [
   { id: 'POWERBALL_PLUS', label: 'PowerBall Plus', days: 'Tue & Fri', drawDays: [2, 5], matrix: '5 from 1–50 + PB 1–16' },
 ] as const;
 
+export const BUNDLES = [
+  {
+    id: 'LOTTO_FAMILY',
+    label: 'Lotto Bundle',
+    subGames: ['LOTTO', 'LOTTO_PLUS_1', 'LOTTO_PLUS_2'],
+    subGamesDisplay: 'Lotto + Plus 1 + Plus 2',
+    days: 'Wed & Sat',
+    drawDays: [3, 6],
+    costPerBoard: 10.0,
+    matrix: '6 from 1–52 + bonus',
+    badgeClass: 'badge-lotto',
+    description: '1 board enters all 3 sub-draws (Lotto R5 + Plus 1 R2.50 + Plus 2 R2.50)',
+  },
+  {
+    id: 'POWERBALL_FAMILY',
+    label: 'PowerBall Bundle',
+    subGames: ['POWERBALL', 'POWERBALL_PLUS'],
+    subGamesDisplay: 'PowerBall + PowerBall Plus',
+    days: 'Tue & Fri',
+    drawDays: [2, 5],
+    costPerBoard: 10.0,
+    matrix: '5 from 1–50 + PB 1–16',
+    badgeClass: 'badge-powerball',
+    description: '1 board enters both sub-draws (PowerBall R5 + PowerBall Plus R5)',
+  },
+] as const;
+
 export type GameId = (typeof GAMES)[number]['id'];
+export type BundleId = (typeof BUNDLES)[number]['id'];
 
 export function gameLabel(id: string): string {
+  if (id === 'LOTTO_FAMILY') return 'Lotto Bundle (Lotto + Plus 1 & 2)';
+  if (id === 'POWERBALL_FAMILY') return 'PowerBall Bundle (PB + PB Plus)';
   return GAMES.find((g) => g.id === id)?.label ?? id;
+}
+
+export function bundleLabel(id: string): string {
+  return BUNDLES.find((b) => b.id === id)?.label ?? gameLabel(id);
+}
+
+export function bundleForGame(id: string) {
+  return BUNDLES.find((b) => b.id === id || (b.subGames as readonly string[]).includes(id));
 }
 
 export function isPowerBallGame(id: string): boolean {
@@ -48,9 +86,10 @@ export function formatDate(value: string | null | undefined): string {
 }
 
 /** Next calendar date (today inclusive) on which the given game is drawn. */
-export function nextDrawDate(gameId: string, from: Date = new Date()): string {
-  const game = GAMES.find((g) => g.id === gameId);
-  const drawDays: readonly number[] = game?.drawDays ?? [];
+export function nextDrawDate(gameOrBundleId: string, from: Date = new Date()): string {
+  const bundle = BUNDLES.find((b) => b.id === gameOrBundleId);
+  const game = GAMES.find((g) => g.id === gameOrBundleId);
+  const drawDays: readonly number[] = bundle?.drawDays ?? game?.drawDays ?? [];
   for (let i = 0; i <= 7; i++) {
     const candidate = new Date(from);
     candidate.setDate(from.getDate() + i);

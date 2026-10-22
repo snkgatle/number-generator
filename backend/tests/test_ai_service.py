@@ -212,7 +212,7 @@ async def test_generator_api_flow(client, db_session):
         assert res.status_code == 201
         data = res.json()
         assert len(data) == 1
-        assert data[0]["game_type"] == "LOTTO"
+        assert data[0]["bundle_name"] == "LOTTO_FAMILY"
         assert data[0]["numbers"] == [7, 14, 21, 28, 35, 42]
         assert data[0]["confidence_score"] == 84.0
 
@@ -221,7 +221,7 @@ async def test_generator_api_flow(client, db_session):
     assert budget_res.status_code == 200
     b_data = budget_res.json()
     assert b_data["used_boards"] == 1
-    assert b_data["remaining_boards"] == 39
+    assert b_data["remaining_boards"] == 19
 
 
 @pytest.mark.asyncio

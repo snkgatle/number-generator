@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.draw import Draw
 from app.schemas.board import AIBoardRecommendation
-from app.schemas.enums import GAME_RULES, GameType
+from app.schemas.enums import BUNDLE_GAMES, BUNDLE_RULES, BundleType, GAME_RULES, GameType
 from app.schemas.stats import (
     DeltaDistributionReport,
     DeltaFrequency,
@@ -32,26 +32,99 @@ class StatsService:
     """Orchestrates historical draw extraction, mathematical pre-processing, and simulations."""
 
     async def get_recent_draws(
-        self, db: AsyncSession, game_type: GameType, limit: int = 50
+        self, db: AsyncSession, game_type: Union[GameType, BundleType, str], limit: int = 50
     ) -> List[Draw]:
-        """Queries the database for the last N official draws for a specific game."""
-        query = (
-            select(Draw)
-            .where(Draw.game_type == game_type.value)
-            .order_by(Draw.draw_date.desc(), Draw.draw_number.desc())
-            .limit(limit)
-        )
+        """Queries the database for the last N official draws for a specific game or bundle."""
+        raw_val = game_type.value if hasattr(game_type, "value") else str(game_type)
+        if raw_val in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            b_type = BundleType(raw_val)
+            member_games = [g.value for g in BUNDLE_GAMES.get(b_type, [])]
+            query = (
+                select(Draw)
+                .where(Draw.game_type.in_(member_games))
+                .order_by(Draw.draw_date.desc(), Draw.draw_number.desc())
+                .limit(limit * len(member_games))
+            )
+        else:
+            query = (
+                select(Draw)
+                .where(Draw.game_type == raw_val)
+                .order_by(Draw.draw_date.desc(), Draw.draw_number.desc())
+                .limit(limit)
+            )
         result = await db.execute(query)
         draws = list(result.scalars().all())
-        logger.debug(f"Retrieved {len(draws)} historical draws for {game_type.value} analysis.")
+        logger.debug(f"Retrieved {len(draws)} historical draws for {raw_val} analysis.")
         return draws
 
     async def get_stats_for_game(
-        self, db: AsyncSession, game_type: GameType, sample_size: int = 50
+        self, db: AsyncSession, game_type: Union[GameType, BundleType, str], sample_size: int = 50
     ) -> StatisticalAnalysisResponse:
         """Fetches the latest draws and computes statistical summary locally."""
         draws = await self.get_recent_draws(db, game_type, limit=sample_size)
         return generate_statistical_summary(draws, game_type)
+
+    async def get_stats_for_bundle(
+        self, db: AsyncSession, bundle_type: Union[BundleType, str], sample_size: int = 50
+    ) -> Dict[str, Any]:
+        """Directive 21 & 22: Aggregates historical data per bundle and finds statistical intersection."""
+        raw_val = bundle_type.value if hasattr(bundle_type, "value") else str(bundle_type)
+        b_type = BundleType(raw_val)
+        member_games = BUNDLE_GAMES.get(b_type, [])
+
+        sub_draws: Dict[str, List[Draw]] = {}
+        sub_stats: Dict[str, StatisticalAnalysisResponse] = {}
+        all_bundle_draws: List[Draw] = []
+
+        for g in member_games:
+            d = await self.get_recent_draws(db, g, limit=sample_size)
+            sub_draws[g.value] = d
+            sub_stats[g.value] = generate_statistical_summary(d, g)
+            all_bundle_draws.extend(d)
+
+        all_bundle_draws.sort(key=lambda x: (x.draw_date, x.draw_number), reverse=True)
+        aggregate_summary = generate_statistical_summary(all_bundle_draws, b_type)
+
+        # Statistical intersection across sub-draws (Directive 22)
+        sub_hot_sets = {g.value: set(n.number for n in sub_stats[g.value].hot_numbers) for g in member_games}
+        all_hot_lists = [list(s) for s in sub_hot_sets.values()]
+        counter = Counter([n for h_list in all_hot_lists for n in h_list])
+        intersection_numbers = sorted([num for num, cnt in counter.items() if cnt >= 2])
+        if not intersection_numbers and all_hot_lists:
+            intersection_numbers = [n.number for n in aggregate_summary.hot_numbers[:5]]
+
+        return {
+            "bundle_name": b_type.value,
+            "aggregate_summary": aggregate_summary,
+            "sub_draw_stats": sub_stats,
+            "statistical_intersection": intersection_numbers,
+            "all_draws": all_bundle_draws,
+        }
+
+    def format_bundle_prompt_variables(
+        self,
+        bundle_data: Dict[str, Any],
+        recent_draws: Optional[List[Draw]] = None,
+    ) -> Dict[str, str]:
+        """Directive 22: Formats multi-draw bundle stats into prompt variables highlighting intersection."""
+        aggregate: StatisticalAnalysisResponse = bundle_data["aggregate_summary"]
+        draws_to_use = recent_draws or bundle_data.get("all_draws")
+        base_vars = self.format_prompt_variables(aggregate, draws=draws_to_use)
+
+        # Format sub-draw breakdowns
+        sub_parts = []
+        for g_name, s_resp in bundle_data["sub_draw_stats"].items():
+            top_nums = ", ".join(str(n.number) for n in s_resp.hot_numbers[:5])
+            sub_parts.append(f"  * {g_name}: {top_nums}")
+        sub_breakdown = "\n".join(sub_parts)
+
+        # Statistical intersection
+        inter_nums = bundle_data.get("statistical_intersection", [])
+        inter_str = ", ".join(str(n) for n in inter_nums) if inter_nums else "None"
+
+        base_vars["sub_draw_breakdown"] = sub_breakdown
+        base_vars["statistical_intersection"] = inter_str
+        return base_vars
 
     def format_prompt_variables(
         self,

@@ -9,15 +9,17 @@ import {
 } from '../services/api';
 import { PageHeader, Alert, CopyButton, Segmented } from './ui';
 import {
-  GAMES,
+  BUNDLES,
   formatDate,
   formatZAR,
   gameLabel,
+  bundleLabel,
+  bundleForGame,
   isPowerBallGame,
   nextDrawDate,
   boardToText,
 } from '../utils/format';
-import { Sparkles, Calendar, Layers, ShieldCheck, Flame, Snowflake, Clock } from 'lucide-react';
+import { Sparkles, Calendar, Layers, ShieldCheck, Flame, Snowflake, Clock, CheckCircle2 } from 'lucide-react';
 
 interface GenerationHubProps {
   circuitBreaker: CircuitBreakerStatus | null;
@@ -28,9 +30,9 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
   circuitBreaker,
   onBoardGenerated,
 }) => {
-  const [selectedGame, setSelectedGame] = useState<string>('LOTTO');
+  const [selectedGame, setSelectedGame] = useState<string>('LOTTO_FAMILY');
   const [allocatedBoards, setAllocatedBoards] = useState<number>(1);
-  const [targetDate, setTargetDate] = useState<string>(nextDrawDate('LOTTO'));
+  const [targetDate, setTargetDate] = useState<string>(nextDrawDate('LOTTO_FAMILY'));
   const [stats, setStats] = useState<StatisticalAnalysis | null>(null);
   const [statsLoading, setStatsLoading] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
@@ -43,11 +45,12 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
     setTargetDate(nextDrawDate(selectedGame));
   }, [selectedGame]);
 
-  // Load statistical summary for selected game
+  // Load statistical summary for selected game or bundle
   useEffect(() => {
     setStatsLoading(true);
     setError(null);
-    fetchGameStatistics(selectedGame, 50)
+    const statQueryGame = selectedGame === 'POWERBALL_FAMILY' ? 'POWERBALL' : selectedGame === 'LOTTO_FAMILY' ? 'LOTTO' : selectedGame;
+    fetchGameStatistics(statQueryGame, 50)
       .then((data) => {
         setStats(data);
         setStatsLoading(false);
@@ -59,8 +62,10 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
   }, [selectedGame]);
 
   const isExhausted = Boolean(circuitBreaker?.is_exhausted) || (circuitBreaker?.remaining_boards ?? 0) <= 0;
-  const remainingQuota = circuitBreaker?.remaining_boards ?? 40;
-  const estimatedCost = allocatedBoards * 5.0;
+  const remainingQuota = circuitBreaker?.remaining_boards ?? 20;
+  const currentBundle = bundleForGame(selectedGame);
+  const costPerBoard = currentBundle?.costPerBoard ?? 10.0;
+  const estimatedCost = allocatedBoards * costPerBoard;
 
   const handleGenerate = async () => {
     if (isExhausted) return;
@@ -72,7 +77,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
       const boards = await generateBoards(selectedGame, allocatedBoards, targetDate);
       setGeneratedBoards(boards);
       setSuccessMsg(
-        `Generated ${boards.length} board${boards.length > 1 ? 's' : ''} for ${gameLabel(selectedGame)} on ${formatDate(targetDate)}.`
+        `Generated ${boards.length} board${boards.length > 1 ? 's' : ''} for ${bundleLabel(selectedGame)} on ${formatDate(targetDate)}.`
       );
       if (onBoardGenerated) {
         onBoardGenerated();
@@ -84,12 +89,12 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
     }
   };
 
-  const gameOptions = GAMES.map((g) => ({
-    value: g.id,
+  const bundleOptions = BUNDLES.map((b) => ({
+    value: b.id,
     label: (
-      <span className="flex items-center gap-1.5">
-        <span>{g.label}</span>
-        <span className="text-2xs text-zinc-500 font-normal">({g.days})</span>
+      <span className="flex items-center gap-1.5 py-0.5">
+        <span className="font-semibold">{b.label}</span>
+        <span className="text-2xs text-zinc-400 font-normal">({b.days} · {formatZAR(b.costPerBoard)})</span>
       </span>
     ),
   }));
@@ -104,7 +109,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
     <div className="space-y-6">
       <PageHeader
         title="Generate boards"
-        description="Probabilistic board generation combining historical frequency analysis and constrained optimization."
+        description="Bundle-based board generation applying 1 ticket across all sub-draws with multi-draw optimization."
       />
 
       {error && <Alert variant="error">{error}</Alert>}
@@ -115,7 +120,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
         <div className="card-header">
           <div>
             <h2 className="card-title">Generation parameters</h2>
-            <p className="card-subtitle">Select game type, draw date, and quantity to generate</p>
+            <p className="card-subtitle">Select game bundle, draw date, and quantity to generate</p>
           </div>
           <span className="badge badge-neutral">
             <Layers className="h-3 w-3" />
@@ -124,17 +129,25 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
         </div>
 
         <div className="card-body space-y-5">
-          {/* Game Selector */}
+          {/* Bundle Selector */}
           <div>
-            <label className="label">Select game</label>
-            <div className="flex flex-wrap gap-1">
+            <label className="label">Select game bundle</label>
+            <div className="flex flex-wrap gap-2">
               <Segmented
-                options={gameOptions}
+                options={bundleOptions}
                 value={selectedGame}
                 onChange={(g) => setSelectedGame(g)}
-                ariaLabel="Lottery game selection"
+                ariaLabel="Lottery game bundle selection"
               />
             </div>
+            {currentBundle && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-accent">
+                <CheckCircle2 className="h-3.5 w-3.5 text-accent shrink-0" />
+                <span>
+                  <strong>1 Generated Board applies to:</strong> {currentBundle.subGamesDisplay} ({currentBundle.description})
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 gap-5 pt-2 border-t border-line sm:grid-cols-3">
@@ -294,7 +307,7 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
 
           <div className="space-y-3">
             {generatedBoards.map((board, idx) => {
-              const isHighConfidence = board.confidence_score >= 85.0;
+              const isHighConfidence = board.confidence_score >= 90.0;
               const textToCopy = boardToText(board);
 
               return (

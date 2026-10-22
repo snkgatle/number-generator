@@ -166,3 +166,59 @@ def test_calculate_draw_roi_summary(prize_service):
     assert summary.net_profit_zar == Decimal("40.00")
     assert summary.roi_percentage == 400.0
     assert summary.winning_boards_count == 1
+
+
+def test_evaluate_board_against_bundle_draws(prize_service):
+    """Directive 24: Evaluate one board across all sub-draws in LOTTO_FAMILY and sum prizes."""
+    from unittest.mock import MagicMock
+    from datetime import date
+
+    # Draw 1: LOTTO - 3 main numbers match -> Div 7: R50.00
+    draw_lotto = MagicMock()
+    draw_lotto.game_type = "LOTTO"
+    draw_lotto.numbers = [3, 15, 22, 31, 40, 52]
+    draw_lotto.bonus_ball = 10
+    draw_lotto.powerball = None
+    draw_lotto.draw_date = date(2026, 10, 21)
+
+    # Draw 2: LOTTO_PLUS_1 - 4 main numbers match -> Div 5: R100.00
+    draw_plus1 = MagicMock()
+    draw_plus1.game_type = "LOTTO_PLUS_1"
+    draw_plus1.numbers = [3, 15, 22, 1, 48, 50]
+    draw_plus1.bonus_ball = 12
+    draw_plus1.powerball = None
+    draw_plus1.draw_date = date(2026, 10, 21)
+
+    # Draw 3: LOTTO_PLUS_2 - 0 match -> R0.00
+    draw_plus2 = MagicMock()
+    draw_plus2.game_type = "LOTTO_PLUS_2"
+    draw_plus2.numbers = [10, 20, 30, 40, 49, 51]
+    draw_plus2.bonus_ball = 7
+    draw_plus2.powerball = None
+    draw_plus2.draw_date = date(2026, 10, 21)
+
+    # Board played: [3, 15, 22, 1, 8, 9] (Cost R10.00)
+    bundle_eval = prize_service.evaluate_board_against_bundle_draws(
+        board_numbers=[3, 15, 22, 1, 8, 9],
+        board_special=None,
+        draws=[draw_lotto, draw_plus1, draw_plus2],
+        bundle_name="LOTTO_FAMILY",
+        cost_per_board=Decimal("10.00"),
+        board_id=101,
+    )
+
+    assert bundle_eval.board_id == 101
+    assert bundle_eval.bundle_name == "LOTTO_FAMILY"
+    assert bundle_eval.is_winner is True
+    # LOTTO: 3 matched (3, 15, 22) -> R50.00
+    # LOTTO_PLUS_1: 4 matched (1, 3, 15, 22) -> R100.00
+    # LOTTO_PLUS_2: 0 matched -> R0.00
+    # Total winnings = R150.00
+    assert bundle_eval.total_winnings_zar == Decimal("150.00")
+    assert bundle_eval.total_cost_zar == Decimal("10.00")
+    assert bundle_eval.net_yield_zar == Decimal("140.00")
+    assert bundle_eval.roi_percentage == 1400.0  # (140 / 10) * 100
+    assert len(bundle_eval.sub_evaluations) == 3
+    assert bundle_eval.sub_evaluations["LOTTO"].prize_amount == Decimal("50.00")
+    assert bundle_eval.sub_evaluations["LOTTO_PLUS_1"].prize_amount == Decimal("100.00")
+    assert bundle_eval.sub_evaluations["LOTTO_PLUS_2"].prize_amount == Decimal("0.00")

@@ -24,12 +24,12 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({ budget, circuitBre
     );
   }
 
-  const totalBoards = budget?.total_boards ?? 40;
+  const totalBoards = budget?.total_boards ?? 20;
   const usedBoards = budget?.used_boards ?? 0;
   const remainingBoards = budget?.remaining_boards ?? totalBoards;
   const totalBudget = Number(budget?.total_budget ?? 200);
   const spentAmount = Number(budget?.spent_amount ?? 0);
-  const costPerBoard = Number(budget?.cost_per_board ?? 5);
+  const costPerBoard = Number(budget?.cost_per_board ?? 10);
   const remainingBudget = Math.max(0, totalBudget - spentAmount);
   const percentUsed = Math.min(100, (usedBoards / Math.max(1, totalBoards)) * 100);
   const isExhausted = Boolean(circuitBreaker?.is_exhausted) || remainingBoards <= 0;
@@ -43,7 +43,7 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({ budget, circuitBre
       hint: `${remainingBoards} boards`,
       tone: isExhausted ? 'text-rose-400' : 'text-zinc-50',
     },
-    { label: 'Boards used', value: `${usedBoards} / ${totalBoards}`, hint: 'Bonus board above 85% confidence' },
+    { label: 'Boards used', value: `${usedBoards} / ${totalBoards}`, hint: 'Bonus board above 90% confidence' },
   ];
 
   return (

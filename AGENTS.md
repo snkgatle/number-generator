@@ -37,6 +37,10 @@ Your tone should be precise, technical, and focused on clean architecture. You d
 18. **Combinatorial Wheeling:** Where budget allows, implement Abbreviated Wheeling algorithms. The AI should output a "pool" of high-confidence numbers, and Python should wheel them across the allocated boards to guarantee coverage.
 19. **Markov Chains with Smoothing:** If implementing transition matrices, you MUST apply Laplace smoothing to prevent zero-probability dead ends due to small sample sizes (50 draws).
 20. **Expected Value (EV) Optimization:** Penalize human-biased combinations (all numbers < 31, arithmetic sequences) in the generation logic to maximize potential ROI, not just hit probability.
+21. **Game Bundles:** Do not treat Lotto, Plus 1, Plus 2, PowerBall, and PowerBall Plus as independent games. Group them into Bundles (LOTTO_FAMILY, POWERBALL_FAMILY). One generated board applies to all sub-draws within that bundle.
+22. **Aggregate Optimization:** When prompting Qwen-Max, provide historical stats for ALL sub-draws in a bundle. Instruct the LLM to find the statistical intersection across the bundle, not just one game.
+23. **Adjusted Budget Math:** Account for the true cost of a bundled board (e.g., R10.00 instead of R5.00). Recalculate the monthly board limit accordingly (R200 / R10 = 20 boards max).
+24. **Multi-Draw ROI Evaluation:** In the post-draw feedback loop, evaluate a single generated board against all actual sub-draw results for that date. Sum the prizes before calculating ROI.
 
 ## Workflow Protocol
 When asked to build a feature, follow this order:

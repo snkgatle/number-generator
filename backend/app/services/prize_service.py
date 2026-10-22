@@ -23,6 +23,22 @@ class PrizeEvaluation(BaseModel):
     is_winner: bool
 
 
+class BundleBoardEvaluation(BaseModel):
+    """Aggregate multi-draw evaluation for a single generated board (Directive 24).
+
+    Sums prizes across all sub-draws in the bundle (e.g. Lotto + Plus 1 + Plus 2).
+    """
+    board_id: Optional[int] = None
+    bundle_name: str
+    target_draw_date: str
+    sub_evaluations: Dict[str, PrizeEvaluation]
+    total_winnings_zar: Decimal
+    total_cost_zar: Decimal = Decimal("10.00")
+    net_yield_zar: Decimal
+    roi_percentage: float
+    is_winner: bool
+
+
 class DrawROISummary(BaseModel):
     """Aggregate financial ROI across all boards in a draw."""
     total_boards: int
@@ -144,6 +160,58 @@ class PrizeService:
             net_yield_zar=net_yield,
             roi_percentage=round(roi, 2),
             is_winner=payout > Decimal("0.00"),
+        )
+
+    def evaluate_board_against_bundle_draws(
+        self,
+        board_numbers: List[int],
+        board_special: Optional[int],
+        draws: List[Any],
+        bundle_name: str = "LOTTO_FAMILY",
+        cost_per_board: Decimal = Decimal("10.00"),
+        board_id: Optional[int] = None,
+    ) -> BundleBoardEvaluation:
+        """Directive 24: Evaluates a single board against all actual sub-draws for that date.
+
+        Sums the prizes before calculating net yield and ROI.
+        """
+        sub_evals: Dict[str, PrizeEvaluation] = {}
+        total_payout = Decimal("0.00")
+        target_date_str = ""
+
+        for draw in draws:
+            if hasattr(draw, "draw_date") and draw.draw_date:
+                target_date_str = draw.draw_date.isoformat()
+            try:
+                g_type = GameType(draw.game_type)
+            except (ValueError, AttributeError):
+                continue
+
+            eval_res = self.evaluate_board(
+                game_type=g_type,
+                board_numbers=board_numbers,
+                board_special=board_special,
+                winning_numbers=draw.numbers,
+                winning_bonus=draw.bonus_ball,
+                winning_powerball=draw.powerball,
+                cost_per_board=Decimal("0.00"),  # Cost is accounted at the bundle board level
+            )
+            sub_evals[draw.game_type] = eval_res
+            total_payout += eval_res.prize_amount
+
+        net_yield = total_payout - cost_per_board
+        roi = float((net_yield / cost_per_board) * 100) if cost_per_board > 0 else 0.0
+
+        return BundleBoardEvaluation(
+            board_id=board_id,
+            bundle_name=bundle_name,
+            target_draw_date=target_date_str,
+            sub_evaluations=sub_evals,
+            total_winnings_zar=total_payout,
+            total_cost_zar=cost_per_board,
+            net_yield_zar=net_yield,
+            roi_percentage=round(roi, 2),
+            is_winner=total_payout > Decimal("0.00"),
         )
 
     @staticmethod

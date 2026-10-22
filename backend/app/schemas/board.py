@@ -2,14 +2,22 @@
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional
+from typing import List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from app.schemas.enums import BoardStatus, GameType, GAME_RULES
+from app.schemas.enums import (
+    BoardStatus,
+    BundleType,
+    GameType,
+    GAME_RULES,
+    BUNDLE_RULES,
+    GAME_TO_BUNDLE,
+)
 
 
 class GeneratedBoardBase(BaseModel):
     """Base schema for an AI-generated lottery board."""
-    game_type: GameType = Field(..., description="Lottery game type")
+    bundle_name: str = Field(default="LOTTO_FAMILY", description="Lottery bundle name (Directive 21)")
+    game_type: Optional[str] = Field(None, description="Alias matching bundle_name for backwards compatibility")
     target_draw_date: date = Field(..., description="Target draw date for this ticket")
     numbers: List[int] = Field(..., description="Sorted list of numbers")
     bonus_or_powerball: Optional[int] = Field(None, description="Powerball or bonus number")
@@ -21,7 +29,7 @@ class GeneratedBoardBase(BaseModel):
     )
     ai_reasoning: Optional[str] = Field(None, description="Analytical reasoning provided by AI")
     status: BoardStatus = Field(default=BoardStatus.PENDING, description="Board lifecycle status")
-    cost: Decimal = Field(default=Decimal("5.00"), ge=0, description="Cost of the board in ZAR")
+    cost: Decimal = Field(default=Decimal("10.00"), ge=0, description="Cost of the bundled board in ZAR (R10.00)")
 
     @field_validator("numbers")
     @classmethod
@@ -35,6 +43,7 @@ class GeneratedBoardBase(BaseModel):
 
 class GeneratedBoardCreate(GeneratedBoardBase):
     """Payload to create a generated board."""
+    bundle_id: Optional[int] = None
     budget_id: Optional[int] = None
     draw_id: Optional[int] = None
 
@@ -44,6 +53,7 @@ class GeneratedBoardResponse(GeneratedBoardBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    bundle_id: Optional[int] = None
     budget_id: Optional[int] = None
     draw_id: Optional[int] = None
     created_at: datetime
@@ -53,6 +63,7 @@ class BoardResultBase(BaseModel):
     """Base schema for board match results."""
     board_id: int
     draw_id: int
+    game_type: str = Field(default="", description="Specific sub-draw game type (e.g., LOTTO, LOTTO_PLUS_1)")
     matched_numbers: List[int] = Field(default_factory=list)
     matched_count: int = Field(default=0, ge=0)
     matched_bonus: bool = Field(default=False)
@@ -74,8 +85,10 @@ class BoardResultResponse(BoardResultBase):
 
 
 class BoardWithResultResponse(GeneratedBoardResponse):
-    """Detailed response of a board with its post-draw evaluation."""
+    """Detailed response of a board with its post-draw evaluation across sub-draws."""
+    results: List[BoardResultResponse] = Field(default_factory=list)
     result: Optional[BoardResultResponse] = None
+    total_prize: Decimal = Field(default=Decimal("0.00"), description="Sum of prizes across all sub-draws (Directive 24)")
 
 
 # ==============================================================================
@@ -87,7 +100,7 @@ class AIBoardRecommendation(BaseModel):
     numbers: List[int] = Field(..., description="Main numbers selected based on statistics")
     bonus_or_powerball: Optional[int] = Field(
         None,
-        description="Powerball number (1-16) if Powerball, otherwise null",
+        description="Powerball number (1-16) if Powerball bundle, otherwise null",
     )
     confidence_score: float = Field(
         ...,
@@ -123,7 +136,7 @@ class AIBoardRecommendation(BaseModel):
 
 class AIGenerationResponse(BaseModel):
     """Root JSON structure enforced on Qwen-Max response."""
-    game_type: GameType = Field(..., description="Validated game type")
+    game_type: Union[GameType, BundleType, str] = Field(..., description="Validated bundle or game type")
     boards: List[AIBoardRecommendation] = Field(
         ...,
         min_length=1,
@@ -139,8 +152,13 @@ class AIGenerationResponse(BaseModel):
     )
 
     def validate_against_game_rules(self) -> None:
-        """Validates all generated boards against official game matrix rules."""
-        rules = GAME_RULES.get(self.game_type)
+        """Validates all generated boards against official game or bundle matrix rules."""
+        raw_key = self.game_type.value if hasattr(self.game_type, "value") else str(self.game_type)
+        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            rules = BUNDLE_RULES.get(BundleType(raw_key), {})
+        else:
+            rules = GAME_RULES.get(GameType(raw_key), {})
+
         if not rules:
             return
 
@@ -171,7 +189,14 @@ class AIGenerationResponse(BaseModel):
 
 class GenerationRequest(BaseModel):
     """Payload to request board generation for an upcoming draw."""
-    game_type: GameType = Field(..., description="Lottery game type to generate")
+    bundle_name: Optional[Union[BundleType, str]] = Field(
+        None,
+        description="Bundle identifier (LOTTO_FAMILY or POWERBALL_FAMILY)",
+    )
+    game_type: Optional[Union[GameType, BundleType, str]] = Field(
+        None,
+        description="Lottery game type or bundle name to generate",
+    )
     target_draw_date: Optional[date] = Field(None, description="Optional target draw date (defaults to next draw)")
     allocated_boards: Optional[int] = Field(
         default=1,
@@ -180,16 +205,30 @@ class GenerationRequest(BaseModel):
         description="Number of boards requested (subject to circuit breaker and budget allocation rules)",
     )
 
+    def resolved_bundle(self) -> BundleType:
+        """Resolves target BundleType from bundle_name or game_type."""
+        target = self.bundle_name or self.game_type or BundleType.LOTTO_FAMILY
+        target_str = target.value if hasattr(target, "value") else str(target)
+
+        if target_str in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            return BundleType(target_str)
+        try:
+            gt = GameType(target_str)
+            return GAME_TO_BUNDLE.get(gt, BundleType.LOTTO_FAMILY)
+        except ValueError:
+            return BundleType.LOTTO_FAMILY
+
 
 class PreDrawPipelineRequest(BaseModel):
     """Payload to trigger pre-draw pipeline."""
-    game_types: Optional[List[GameType]] = Field(None, description="Lottery games to run generation for")
+    bundles: Optional[List[Union[BundleType, str]]] = Field(None, description="Bundle families to run generation for")
+    game_types: Optional[List[Union[GameType, BundleType, str]]] = Field(None, description="Legacy game types or bundles")
     target_date: Optional[date] = Field(None, description="Optional target draw date")
 
 
 class PostDrawFeedbackResponse(BaseModel):
     """Schema returned by Qwen-Max analyzing performance deviations and recalibrations."""
-    game_type: GameType
+    game_type: Union[GameType, BundleType, str]
     draw_date: str
     accuracy_rate: float = Field(..., ge=0.0, le=1.0, description="Proportion of predicted numbers that aligned")
     divergence_analysis: str = Field(..., description="In-depth post-mortem of statistical deviations")

@@ -1,8 +1,8 @@
 """Pydantic schemas for statistical pre-processing and lottery pattern analysis."""
 from datetime import date
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
-from app.schemas.enums import GameType
+from app.schemas.enums import BundleType, GameType
 
 
 class NumberFrequency(BaseModel):
@@ -42,7 +42,7 @@ class LLMPromptContext(BaseModel):
 
 class StatisticalAnalysisResponse(BaseModel):
     """Comprehensive statistical metrics calculated locally before AI prompt synthesis."""
-    game_type: GameType
+    game_type: Union[GameType, BundleType, str]
     sample_size: int
     date_range_start: Optional[date] = None
     date_range_end: Optional[date] = None

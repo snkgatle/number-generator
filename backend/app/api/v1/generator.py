@@ -5,10 +5,12 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.database import get_db
 from app.models.board import BoardResult, GeneratedBoard
+from app.models.bundle import GameBundle
 from app.models.draw import Draw
 from app.schemas.board import (
     BoardWithResultResponse,
@@ -17,15 +19,13 @@ from app.schemas.board import (
     PostDrawFeedbackResponse,
     PreDrawPipelineRequest,
 )
-from app.schemas.enums import GameType, get_next_draw_date
+from app.schemas.enums import BundleType, GameType, GAME_TO_BUNDLE, get_next_draw_date
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
 from app.services.budget_service import BudgetExhaustedException, BudgetService
 from app.services.dedup_service import DedupService
 from app.services.notifier import Notifier
 from app.services.stats_service import StatsService
-
-from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/generator", tags=["Generator"])
 ai_service = AIService()
@@ -39,18 +39,25 @@ notifier = Notifier()
 @router.get("/boards", response_model=List[BoardWithResultResponse])
 async def list_generated_boards(
     game_type: Optional[GameType] = Query(None, description="Filter by lottery game type"),
+    bundle_name: Optional[BundleType] = Query(None, description="Filter by game bundle"),
     limit: int = Query(50, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve generated lottery boards sorted by creation timestamp descending."""
     query = (
         select(GeneratedBoard)
-        .options(selectinload(GeneratedBoard.result))
+        .options(selectinload(GeneratedBoard.results))
         .order_by(GeneratedBoard.created_at.desc())
         .limit(limit)
     )
-    if game_type:
-        query = query.where(GeneratedBoard.game_type == game_type.value)
+    if bundle_name:
+        query = query.where(GeneratedBoard.bundle_name == bundle_name.value)
+    elif game_type:
+        b_type = GAME_TO_BUNDLE.get(game_type)
+        if b_type:
+            query = query.where(GeneratedBoard.bundle_name == b_type.value)
+        else:
+            query = query.where(GeneratedBoard.bundle_name == game_type.value)
     result = await db.execute(query)
     return result.scalars().all()
 
@@ -61,7 +68,11 @@ async def get_board_by_id(
     db: AsyncSession = Depends(get_db),
 ):
     """Retrieve a single generated board including its post-draw match results if evaluated."""
-    query = select(GeneratedBoard).where(GeneratedBoard.id == board_id)
+    query = (
+        select(GeneratedBoard)
+        .options(selectinload(GeneratedBoard.results))
+        .where(GeneratedBoard.id == board_id)
+    )
     result = await db.execute(query)
     board = result.scalar_one_or_none()
     if not board:
@@ -79,6 +90,15 @@ async def generate_boards(
 ):
     """Trigger AI generation pipeline subject to Directive 3 Budget Circuit Breaker."""
     requested_boards = payload.allocated_boards or 1
+    bundle_type = payload.resolved_bundle()
+
+    # Query GameBundle entity to link bundle_id and cost
+    bundle_res = await db.execute(
+        select(GameBundle).where(GameBundle.bundle_name == bundle_type.value)
+    )
+    bundle_entity = bundle_res.scalar_one_or_none()
+    bundle_id = bundle_entity.id if bundle_entity else None
+    board_cost = bundle_entity.total_cost_per_board if bundle_entity else Decimal(str(settings.COST_PER_BOARD))
 
     # Directive 3: Budget Circuit Breaker check
     try:
@@ -104,24 +124,24 @@ async def generate_boards(
             detail="Budget Exhausted. Board generation halted by Circuit Breaker.",
         )
 
-    # Phase 3: Statistical Pre-Processing (Executed locally in Python before calling LLM)
-    recent_draws = await stats_service.get_recent_draws(db, payload.game_type, limit=50)
-    stats = await stats_service.get_stats_for_game(db, payload.game_type, sample_size=50)
-    prompt_vars = stats_service.format_prompt_variables(stats, draws=recent_draws)
+    # Directive 21 & 22: Bundle Statistical Pre-Processing across all sub-draws
+    bundle_stats = await stats_service.get_stats_for_bundle(db, bundle_type, sample_size=50)
+    recent_draws = await stats_service.get_recent_draws(db, bundle_type, limit=50)
+    prompt_vars = stats_service.format_bundle_prompt_variables(bundle_stats, recent_draws=recent_draws)
 
     # Directive 16: Guardrailed environmental metadata test (p < 0.05 only)
     env_report = stats_service.calculate_environmental_correlations(recent_draws)
     env_anomalies = env_report.llm_prompt_summary if env_report.has_significant_anomalies else None
 
     # Directive 11: Fetch actionable temporal bias
-    temporal_bias = await analytics_service.get_latest_actionable_bias(db, payload.game_type)
+    temporal_bias = await analytics_service.get_latest_actionable_bias(db, bundle_type)
 
-    target_date = payload.target_draw_date or get_next_draw_date(payload.game_type)
+    target_date = payload.target_draw_date or get_next_draw_date(bundle_type)
 
     # Phase 4: Qwen-Max Generation with Strict JSON Enforcement & Monte Carlo Stress Testing (Directive 15)
     try:
         ai_response = await ai_service.generate_boards(
-            game_type=payload.game_type,
+            game_type=bundle_type,
             target_draw_date=target_date,
             allocated_boards=requested_boards,
             stats_context=prompt_vars,
@@ -139,7 +159,7 @@ async def generate_boards(
     unique_boards, collisions = await dedup_service.deduplicate_boards(
         db=db,
         candidate_boards=ai_response.boards,
-        game_type=payload.game_type,
+        game_type=bundle_type,
         target_date=target_date,
     )
 
@@ -151,12 +171,12 @@ async def generate_boards(
 
     # Persist generated boards and deduct quota
     created_boards: List[GeneratedBoard] = []
-    board_cost = Decimal(str(settings.COST_PER_BOARD))
 
     for rec in unique_boards:
         board_entity = GeneratedBoard(
+            bundle_id=bundle_id,
             budget_id=budget.id,
-            game_type=payload.game_type.value,
+            bundle_name=bundle_type.value,
             target_draw_date=target_date,
             numbers=rec.numbers,
             bonus_or_powerball=rec.bonus_or_powerball,

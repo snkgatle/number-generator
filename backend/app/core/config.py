@@ -42,18 +42,18 @@ class Settings(BaseSettings):
         description="Target model identifier",
     )
 
-    # Budget & Allocation Rules
+    # Budget & Allocation Rules (Directive 23: R10/board = 20 boards/month)
     DEFAULT_MONTHLY_BUDGET: float = Field(
         default=200.00,
         description="Default monthly budget in ZAR",
     )
     COST_PER_BOARD: float = Field(
-        default=5.00,
-        description="Cost in ZAR per board generated",
+        default=10.00,
+        description="Cost in ZAR per bundled board generated (Directive 23)",
     )
     TOTAL_MONTHLY_BOARDS: int = Field(
-        default=40,
-        description="Default max boards per month (200 / 5 = 40)",
+        default=20,
+        description="Default max boards per month (200 / 10 = 20) (Directive 23)",
     )
     BUDGET_CYCLE_ROLLOVER_DAY: int = Field(
         default=25,

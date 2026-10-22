@@ -4,10 +4,10 @@ Executes purely locally in Python before any LLM invocations to minimize token c
 and maximize predictive grounding.
 """
 from collections import Counter
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from app.models.draw import Draw
-from app.schemas.enums import GAME_RULES, GameType
+from app.schemas.enums import BUNDLE_RULES, BundleType, GAME_RULES, GameType
 from app.schemas.stats import (
     ConsecutivePair,
     LLMPromptContext,
@@ -172,7 +172,11 @@ def calculate_special_ball_stats(
     if not draws:
         return None
 
-    rules = GAME_RULES.get(game_type, {})
+    raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
+    if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+        rules = BUNDLE_RULES.get(BundleType(raw_key), {})
+    else:
+        rules = GAME_RULES.get(game_type, {})
     total = len(draws)
 
     if rules.get("has_powerball"):
@@ -219,13 +223,17 @@ def calculate_special_ball_stats(
 
 
 def generate_statistical_summary(
-    draws: List[Draw], game_type: GameType
+    draws: List[Draw], game_type: Union[GameType, BundleType, str]
 ) -> StatisticalAnalysisResponse:
     """Combines all pre-processing calculations into a unified response
 
     including optimized variables formatted for Qwen-Max prompt templates.
     """
-    rules = GAME_RULES.get(game_type, {})
+    raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
+    if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+        rules = BUNDLE_RULES.get(BundleType(raw_key), {})
+    else:
+        rules = GAME_RULES.get(game_type, {})
     min_num = rules.get("main_number_min", 1)
     max_num = rules.get("main_number_max", 52)
 

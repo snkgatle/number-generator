@@ -286,3 +286,35 @@ def test_run_monte_carlo_stress_test():
     # Board 1 contains numbers with heavy historical weight (5, 44, 12)
     # It should have a higher simulated hit rate than board 2 (unobserved numbers)
     assert results[0].match_2_or_more_rate >= results[1].match_2_or_more_rate
+
+
+@pytest.mark.asyncio
+async def test_bundle_stats_and_intersection(db_session):
+    """Directive 21 & 22: Verify multi-draw stats aggregation and statistical intersection."""
+    from app.schemas.enums import BundleType
+
+    # Seed draws across LOTTO, LOTTO_PLUS_1, LOTTO_PLUS_2
+    # Notice: 7 and 14 appear in multiple sub-draws
+    d1 = Draw(draw_number=501, game_type="LOTTO", draw_date=date(2026, 10, 14), numbers=[7, 14, 21, 28, 35, 42])
+    d2 = Draw(draw_number=502, game_type="LOTTO_PLUS_1", draw_date=date(2026, 10, 14), numbers=[7, 14, 22, 29, 36, 43])
+    d3 = Draw(draw_number=503, game_type="LOTTO_PLUS_2", draw_date=date(2026, 10, 14), numbers=[7, 14, 23, 30, 37, 44])
+    db_session.add_all([d1, d2, d3])
+    await db_session.commit()
+
+    service = StatsService()
+    bundle_data = await service.get_stats_for_bundle(db_session, BundleType.LOTTO_FAMILY, sample_size=10)
+
+    assert bundle_data["bundle_name"] == "LOTTO_FAMILY"
+    assert "aggregate_summary" in bundle_data
+    assert "sub_draw_stats" in bundle_data
+    assert len(bundle_data["sub_draw_stats"]) == 3
+    # 7 and 14 should appear in the intersection of hot numbers
+    intersection = bundle_data["statistical_intersection"]
+    assert 7 in intersection
+    assert 14 in intersection
+
+    # Verify prompt formatting
+    prompt_vars = service.format_bundle_prompt_variables(bundle_data)
+    assert "sub_draw_breakdown" in prompt_vars
+    assert "statistical_intersection" in prompt_vars
+    assert "7" in prompt_vars["statistical_intersection"]

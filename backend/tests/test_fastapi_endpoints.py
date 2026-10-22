@@ -28,8 +28,8 @@ async def test_dashboard_budget_current(client):
     response = await client.get("/api/v1/dashboard/budget/current")
     assert response.status_code == 200
     data = response.json()
-    assert data["total_boards"] == 40
-    assert data["remaining_boards"] == 40
+    assert data["total_boards"] == 20
+    assert data["remaining_boards"] == 20
     assert data["is_exhausted"] is False
     assert float(data["total_budget"]) == 200.0
 
@@ -41,7 +41,7 @@ async def test_circuit_breaker_endpoint(client):
     assert response.status_code == 200
     data = response.json()
     assert data["allowed"] is True
-    assert data["remaining_boards"] == 40
+    assert data["remaining_boards"] == 20
     assert data["is_exhausted"] is False
 
 
@@ -92,7 +92,7 @@ async def test_generator_trigger(client):
         assert response.status_code == 201
         data = response.json()
         assert len(data) == 1
-        assert data[0]["game_type"] == "LOTTO"
+        assert data[0]["bundle_name"] == "LOTTO_FAMILY"
 
 
 def test_setup_logging():

@@ -15,9 +15,14 @@ interface OverviewProps {
 }
 
 export function boardOutcome(b: BoardWithResult): 'won' | 'lost' | 'pending' {
-  const prize = Number(b.result?.prize_amount ?? 0);
+  const prize = Number(
+    b.total_prize ??
+    (b.results && b.results.length > 0
+      ? b.results.reduce((s, r) => s + Number(r.prize_amount || 0), 0)
+      : b.result?.prize_amount ?? 0)
+  );
   if (b.status === 'WON' || prize > 0) return 'won';
-  if (b.status === 'LOST' || b.result) return 'lost';
+  if (b.status === 'LOST' || (b.results && b.results.length > 0) || b.result) return 'lost';
   return 'pending';
 }
 

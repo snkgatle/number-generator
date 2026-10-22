@@ -5,14 +5,14 @@ boards for a single draw date to prevent duplicate plays.
 """
 from datetime import date
 import hashlib
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple, Union
 from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.board import GeneratedBoard
 from app.schemas.board import AIBoardRecommendation
-from app.schemas.enums import GameType
+from app.schemas.enums import BundleType, GameType
 
 
 class DedupService:
@@ -38,11 +38,12 @@ class DedupService:
         return hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
 
     async def get_existing_board_hashes(
-        self, db: AsyncSession, game_type: GameType, target_date: date
+        self, db: AsyncSession, game_type: Union[GameType, BundleType, str], target_date: date
     ) -> Set[str]:
         """Queries the database for existing boards on target date and returns their fingerprints."""
+        raw_val = game_type.value if hasattr(game_type, "value") else str(game_type)
         query = select(GeneratedBoard).where(
-            GeneratedBoard.game_type == game_type.value,
+            (GeneratedBoard.bundle_name == raw_val),
             GeneratedBoard.target_draw_date == target_date,
         )
         result = await db.execute(query)
@@ -52,13 +53,13 @@ class DedupService:
             self.compute_board_fingerprint(
                 numbers=b.numbers,
                 bonus_or_powerball=b.bonus_or_powerball,
-                game_type=b.game_type,
+                game_type=b.bundle_name,
                 target_date=b.target_draw_date,
             )
             for b in existing_boards
         }
         logger.debug(
-            f"Found {len(hashes)} existing board fingerprints for {game_type.value} on {target_date}."
+            f"Found {len(hashes)} existing board fingerprints for {raw_val} on {target_date}."
         )
         return hashes
 
@@ -66,7 +67,7 @@ class DedupService:
         self,
         db: AsyncSession,
         candidate_boards: List[AIBoardRecommendation],
-        game_type: GameType,
+        game_type: Union[GameType, BundleType, str],
         target_date: date,
     ) -> Tuple[List[AIBoardRecommendation], int]:
         """Filters duplicate boards across the candidate list and existing database entries.
@@ -75,7 +76,8 @@ class DedupService:
         Returns:
             Tuple of (unique_boards, duplicates_filtered_count)
         """
-        existing_hashes = await self.get_existing_board_hashes(db, game_type, target_date)
+        raw_val = game_type.value if hasattr(game_type, "value") else str(game_type)
+        existing_hashes = await self.get_existing_board_hashes(db, raw_val, target_date)
         seen_in_batch: Set[str] = set()
 
         unique_boards: List[AIBoardRecommendation] = []
@@ -85,13 +87,13 @@ class DedupService:
             h = self.compute_board_fingerprint(
                 numbers=board.numbers,
                 bonus_or_powerball=board.bonus_or_powerball,
-                game_type=game_type.value,
+                game_type=raw_val,
                 target_date=target_date,
             )
 
             if h in existing_hashes:
                 logger.warning(
-                    f"Collision detected with historical board for {game_type.value} on {target_date}: "
+                    f"Collision detected with historical board for {raw_val} on {target_date}: "
                     f"numbers={board.numbers}, pb={board.bonus_or_powerball}. Filtering."
                 )
                 collisions_count += 1
@@ -99,7 +101,7 @@ class DedupService:
 
             if h in seen_in_batch:
                 logger.warning(
-                    f"Duplicate board collision within candidate batch for {game_type.value}: "
+                    f"Duplicate board collision within candidate batch for {raw_val}: "
                     f"numbers={board.numbers}, pb={board.bonus_or_powerball}. Filtering."
                 )
                 collisions_count += 1
@@ -109,7 +111,7 @@ class DedupService:
             unique_boards.append(board)
 
         logger.info(
-            f"Deduplication completed for {game_type.value}: "
+            f"Deduplication completed for {raw_val}: "
             f"{len(unique_boards)} unique boards retained, {collisions_count} collisions eliminated."
         )
         return unique_boards, collisions_count

@@ -18,12 +18,12 @@ class MonthlyBudgetBase(BaseModel):
         description="Total budget allocation for the month in ZAR",
     )
     cost_per_board: Decimal = Field(
-        default=Decimal("5.00"),
+        default=Decimal("10.00"),
         gt=0,
-        description="Cost in ZAR per single lottery board",
+        description="Cost in ZAR per bundled lottery board",
     )
     total_boards: int = Field(
-        default=40,
+        default=20,
         ge=0,
         description="Total allowed boards based on budget / cost_per_board",
     )
@@ -33,7 +33,7 @@ class MonthlyBudgetBase(BaseModel):
         description="Number of boards already generated this month",
     )
     remaining_boards: int = Field(
-        default=40,
+        default=20,
         ge=0,
         description="Number of boards remaining to generate",
     )

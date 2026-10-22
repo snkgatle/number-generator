@@ -59,7 +59,7 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 
 ## Phase 5: Budget Engine & Board Allocation
 - [x] Create `budget/engine.py`.
-- [x] Implement monthly initialization (R200 = 40 boards, resets 25th of month on payday cycle).
+- [x] Implement monthly initialization (R200 = 20 bundled boards @ R10.00, resets 25th of month on payday cycle, Directive 23).
 - [x] Write the confidence-based allocation algorithm (Base 1 board per draw, extra boards for >85% confidence).
 - [x] Implement the Circuit Breaker check.
 - [x] Create the APScheduler cron job to run the full pipeline (Stats -> AI -> Budget -> Save) automatically before draws.

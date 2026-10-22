@@ -3,8 +3,7 @@
 Adheres strictly to:
 - Directive 3: Query monthly_budgets before ANY board generation logic executes.
   If remaining_boards <= 0, halt execution and log 'Budget Exhausted'.
-- Phase 5: R200 monthly initialization (40 boards) and confidence-based allocation:
-  Base 1 board per draw, extra boards for >85% confidence.
+- Directive 23: R200 monthly initialization (20 bundled boards @ R10.00) and confidence-based allocation.
 """
 import calendar
 from datetime import date, datetime, timedelta
@@ -78,7 +77,7 @@ class BudgetEngine:
     ) -> MonthlyBudget:
         """Retrieves or initializes the monthly budget record for the given period.
 
-        Initializes with default values: R200 budget, R5/board = 40 boards.
+        Initializes with default values: R200 budget, R10/board = 20 boards (Directive 23).
         """
         ym = year_month or self.current_year_month()
         query = select(MonthlyBudget).where(MonthlyBudget.year_month == ym)

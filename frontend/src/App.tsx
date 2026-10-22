@@ -54,7 +54,7 @@ export default function App() {
     window.scrollTo({ top: 0 });
   };
 
-  const totalBoards = budget?.total_boards ?? 40;
+  const totalBoards = budget?.total_boards ?? 20;
   const remainingBoards = budget?.remaining_boards ?? 0;
   const remainingZar = budget ? Number(budget.total_budget) - Number(budget.spent_amount) : 0;
   const exhausted = Boolean(circuitBreaker?.is_exhausted) || (budget !== null && remainingBoards <= 0);

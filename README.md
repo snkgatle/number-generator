@@ -36,7 +36,7 @@ graph TD
 
 1. **No Hardcoded Secrets**: All credentials and connection URIs are loaded via `pydantic-settings` from `.env`.
 2. **Strict JSON Enforcement**: Prompts to Qwen-Max enforce schema outputs validated with Pydantic (`AIGenerationResponse`, `AIBoardRecommendation`) before persisting to PostgreSQL.
-3. **Budget Circuit Breaker (Directive 3)**: Before **ANY** board generation executes, the system queries `monthly_budgets`. If `remaining_boards <= 0`, execution is immediately halted with `"Budget Exhausted"`. Max 40 boards @ R5.00/board (R200/month).
+3. **Budget Circuit Breaker (Directive 3)**: Before **ANY** board generation executes, the system queries `monthly_budgets`. If `remaining_boards <= 0`, execution is immediately halted with `"Budget Exhausted"`. Max 20 bundled boards @ R10.00/board (R200/month, Directive 23).
 4. **Idempotent Scraping**: The Playwright scraper uses PostgreSQL `ON CONFLICT (draw_number, game_type) DO NOTHING` (or SQLite equivalent in tests) to guarantee zero duplicates.
 5. **Separation of Concerns**:
    - `backend/app/services/scraper_service.py` handles web fetching and parsing.
@@ -82,8 +82,8 @@ QWEN_MODEL="qwen-max"
 
 # Budget Limits
 DEFAULT_MONTHLY_BUDGET=200.00
-COST_PER_BOARD=5.00
-TOTAL_MONTHLY_BOARDS=40
+COST_PER_BOARD=10.00
+TOTAL_MONTHLY_BOARDS=20
 ```
 
 ### 3. Run with Podman Compose or Docker Compose
@@ -133,7 +133,7 @@ LottoMind registers three automated cron jobs via **APScheduler** upon FastAPI s
 | :--- | :--- | :--- |
 | **Pre-Draw Pipeline** | `Tue, Wed, Fri, Sat @ 18:00` | Checks circuit breaker $\rightarrow$ runs mathematical frequency analysis $\rightarrow$ prompts Qwen-Max for constrained boards $\rightarrow$ saves pending boards. |
 | **Post-Draw Pipeline** | `Tue, Wed, Fri, Sat @ 22:30` | Scrapes official winning numbers with `ON CONFLICT DO NOTHING` $\rightarrow$ evaluates pending boards $\rightarrow$ runs AI divergence post-mortem. |
-| **Monthly Rollover** | `25th of month @ 00:01` | Initializes a fresh R200 / 40 board budget quota for the new payday cycle (25th to 24th). |
+| **Monthly Rollover** | `25th of month @ 00:01` | Initializes a fresh R200 / 20 bundled board budget quota for the new payday cycle (25th to 24th). |
 
 ---
 

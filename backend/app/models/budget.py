@@ -38,12 +38,12 @@ class MonthlyBudget(Base):
     cost_per_board: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        default=Decimal("5.00"),
+        default=Decimal("10.00"),
     )
     total_boards: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        default=40,
+        default=20,
     )
     used_boards: Mapped[int] = mapped_column(
         Integer,
@@ -53,7 +53,7 @@ class MonthlyBudget(Base):
     remaining_boards: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        default=40,
+        default=20,
     )
     spent_amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),

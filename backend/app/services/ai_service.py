@@ -114,7 +114,7 @@ class AIService:
             }
 
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0)) as client:
                     resp = await client.post(url, headers=headers, json=payload)
             except Exception as net_err:
                 logger.error(f"Network error communicating with Qwen API at {url}: {net_err}")

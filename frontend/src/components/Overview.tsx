@@ -33,6 +33,17 @@ export const OutcomeBadge: React.FC<{ board: BoardWithResult }> = ({ board }) =>
   return <span className="badge badge-warning">Awaiting draw</span>;
 };
 
+function getGameTagStyle(gameId: string): string {
+  if (gameId.includes('POWERBALL')) {
+    return 'bg-rose-500/15 border-rose-500/30 text-rose-300';
+  } else if (gameId.includes('PLUS_2')) {
+    return 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300';
+  } else if (gameId.includes('PLUS')) {
+    return 'bg-sky-500/15 border-sky-500/30 text-sky-300';
+  }
+  return 'bg-indigo-500/15 border-indigo-500/30 text-indigo-300';
+}
+
 export const Overview: React.FC<OverviewProps> = ({ budget, circuitBreaker, loading, onNavigate }) => {
   const [boards, setBoards] = useState<BoardWithResult[]>([]);
   const [boardsLoading, setBoardsLoading] = useState(true);
@@ -65,15 +76,19 @@ export const Overview: React.FC<OverviewProps> = ({ budget, circuitBreaker, load
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
         {/* Upcoming draws */}
-        <section className="card xl:col-span-2" aria-labelledby="upcoming-heading">
-          <div className="card-header">
-            <div>
-              <h2 id="upcoming-heading" className="card-title">
-                Upcoming draws
-              </h2>
-              <p className="card-subtitle">Next scheduled draw per game</p>
+        <section className="card xl:col-span-2 overflow-hidden" aria-labelledby="upcoming-heading">
+          <div className="card-header bg-gradient-to-r from-surface-2 to-surface-3/40">
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+                <CalendarDays className="h-4 w-4" />
+              </div>
+              <div>
+                <h2 id="upcoming-heading" className="card-title">
+                  Upcoming draws
+                </h2>
+                <p className="card-subtitle">Next scheduled draw per game</p>
+              </div>
             </div>
-            <CalendarDays className="h-4 w-4 text-zinc-600" strokeWidth={1.75} />
           </div>
           <table className="data-table">
             <thead>
@@ -87,12 +102,22 @@ export const Overview: React.FC<OverviewProps> = ({ budget, circuitBreaker, load
               {upcoming.map((g) => (
                 <tr key={g.id}>
                   <td>
-                    <div className="font-medium text-zinc-100">{g.label}</div>
-                    <div className="text-xs text-zinc-500">{g.days}</div>
+                    <div className="flex items-center gap-2">
+                      <span className={`badge border text-xs px-2 py-0.5 ${getGameTagStyle(g.id)}`}>
+                        {g.label}
+                      </span>
+                    </div>
+                    <div className="text-2xs text-zinc-500 mt-0.5">{g.days}</div>
                   </td>
-                  <td className="text-zinc-300">{formatDate(g.next)}</td>
+                  <td className="text-zinc-300 font-mono text-xs">{formatDate(g.next)}</td>
                   <td className="text-right">
-                    <span className={`badge ${relativeDay(g.next) === 'Today' ? 'badge-accent' : 'badge-neutral'}`}>
+                    <span
+                      className={`badge border ${
+                        relativeDay(g.next) === 'Today'
+                          ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 font-bold animate-pulse'
+                          : 'badge-neutral'
+                      }`}
+                    >
                       {relativeDay(g.next)}
                     </span>
                   </td>
@@ -103,13 +128,18 @@ export const Overview: React.FC<OverviewProps> = ({ budget, circuitBreaker, load
         </section>
 
         {/* Recent boards */}
-        <section className="card xl:col-span-3" aria-labelledby="recent-heading">
-          <div className="card-header">
-            <div>
-              <h2 id="recent-heading" className="card-title">
-                Recent boards
-              </h2>
-              <p className="card-subtitle">Latest generated boards and their outcome</p>
+        <section className="card xl:col-span-3 overflow-hidden" aria-labelledby="recent-heading">
+          <div className="card-header bg-gradient-to-r from-surface-2 to-surface-3/40">
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-md bg-purple-500/10 border border-purple-500/30 text-purple-400">
+                <Ticket className="h-4 w-4" />
+              </div>
+              <div>
+                <h2 id="recent-heading" className="card-title">
+                  Recent boards
+                </h2>
+                <p className="card-subtitle">Latest generated boards and their outcome</p>
+              </div>
             </div>
             <button className="btn btn-ghost btn-sm" onClick={() => onNavigate('results')}>
               View all
@@ -134,10 +164,12 @@ export const Overview: React.FC<OverviewProps> = ({ budget, circuitBreaker, load
               {boards.map((b) => {
                 const matched = new Set(b.result?.matched_numbers ?? []);
                 return (
-                  <li key={b.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                  <li key={b.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between hover:bg-surface-3/30 transition-colors">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium text-zinc-100">{gameLabel(b.game_type)}</span>
+                        <span className={`badge border text-xs px-2 py-0.5 ${getGameTagStyle(b.game_type)}`}>
+                          {gameLabel(b.game_type)}
+                        </span>
                         <span className="text-xs text-zinc-500">{formatDate(b.target_draw_date)}</span>
                       </div>
                       <div className="mt-2">

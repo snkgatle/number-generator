@@ -62,6 +62,9 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-surface-0 text-zinc-100">
+      {/* Ambient top glowing edge */}
+      <div className="h-[2px] w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500" />
+
       {/* Top Navigation Bar */}
       <header className="sticky top-0 z-30 border-b border-line bg-surface-0/95 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6">
@@ -71,11 +74,15 @@ export default function App() {
               onClick={() => navigate('overview')}
               className="flex items-center gap-2.5 text-left transition-opacity hover:opacity-90"
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-line-strong bg-surface-2 shadow-sm">
-                <span className="h-3.5 w-3.5 rounded-full border-2 border-accent" />
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 p-[1.5px] shadow-md shadow-indigo-500/20">
+                <div className="flex h-full w-full items-center justify-center rounded-[6.5px] bg-surface-0">
+                  <Sparkles className="h-4 w-4 text-indigo-400" />
+                </div>
               </div>
               <div className="leading-tight">
-                <div className="text-sm font-bold tracking-tight text-zinc-50">LottoMind</div>
+                <div className="text-sm font-bold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-zinc-50 via-zinc-100 to-zinc-400">
+                  LottoMind
+                </div>
                 <div className="text-2xs font-mono text-zinc-500">Lottery Analytics</div>
               </div>
             </button>
@@ -89,12 +96,12 @@ export default function App() {
                   onClick={() => navigate(id)}
                   className={`inline-flex items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-medium transition-all ${
                     activeTab === id
-                      ? 'bg-surface-3 text-zinc-50 shadow-[inset_0_0_0_1px_theme(colors.line.strong)]'
+                      ? 'bg-gradient-to-r from-indigo-500/15 to-purple-500/15 border border-indigo-500/30 text-indigo-200 shadow-sm'
                       : 'text-zinc-400 hover:text-zinc-100 hover:bg-surface-2/60'
                   }`}
                   aria-current={activeTab === id ? 'page' : undefined}
                 >
-                  <Icon className="h-3.5 w-3.5" strokeWidth={1.8} />
+                  <Icon className={`h-3.5 w-3.5 ${activeTab === id ? 'text-indigo-400' : ''}`} strokeWidth={1.8} />
                   <span>{label}</span>
                 </button>
               ))}

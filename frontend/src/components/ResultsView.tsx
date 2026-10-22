@@ -30,6 +30,18 @@ import {
   Ticket,
   X,
 } from 'lucide-react';
+import {
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
+} from 'recharts';
 
 export const ResultsView: React.FC = () => {
   const [boards, setBoards] = useState<BoardWithResult[]>([]);
@@ -113,6 +125,34 @@ export const ResultsView: React.FC = () => {
   const netRoi = totalCost > 0 ? (netPL / totalCost) * 100 : 0;
   const hitRate = evaluatedCount > 0 ? (wonBoards.length / evaluatedCount) * 100 : 0;
 
+  // Visual Chart Data
+  const outcomePieData = [
+    { name: 'Won (Prize)', value: wonBoards.length, color: '#10b981' },
+    { name: 'Awaiting Draw', value: pendingBoards.length, color: '#f59e0b' },
+    { name: 'No Prize', value: lostBoards.length, color: '#64748b' },
+  ].filter((d) => d.value > 0);
+
+  const financialHistory = [...boards]
+    .reverse()
+    .reduce((acc: any[], b, idx) => {
+      const cost = Number(b.cost || 10);
+      const prize = Number(
+        b.total_prize ??
+          (b.results && b.results.length > 0
+            ? b.results.reduce((s, r) => s + Number(r.prize_amount || 0), 0)
+            : b.result?.prize_amount ?? 0)
+      );
+      const prevCost = idx > 0 ? acc[idx - 1].cumCost : 0;
+      const prevPrize = idx > 0 ? acc[idx - 1].cumPrize : 0;
+      acc.push({
+        board: `#${idx + 1}`,
+        cumCost: prevCost + cost,
+        cumPrize: prevPrize + prize,
+        date: formatDate(b.target_draw_date),
+      });
+      return acc;
+    }, []);
+
   const filteredBoards = boards.filter((b) => {
     const prize = Number(b.total_prize ?? (b.result?.prize_amount ?? 0));
     const hasResults = Boolean((b.results && b.results.length > 0) || b.result);
@@ -186,8 +226,159 @@ export const ResultsView: React.FC = () => {
         />
       </div>
 
+      {/* Visual Analytics Row: Cumulative Finance Chart & Outcome Donut */}
+      {boards.length > 0 && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* Cumulative Spend vs Prize AreaChart */}
+          <div className="card lg:col-span-2">
+            <div className="card-header bg-gradient-to-r from-surface-2 to-surface-3/40">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-indigo-500/10 border border-indigo-500/30 text-indigo-400">
+                  <TrendingUp className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="card-title">Cumulative return progression</h3>
+                  <p className="card-subtitle">Cumulative cost vs prize winnings across generated boards</p>
+                </div>
+              </div>
+              <span className={`badge ${netPL >= 0 ? 'badge-success' : 'badge-neutral'} font-mono text-2xs`}>
+                Net P/L: {formatZAR(netPL)}
+              </span>
+            </div>
+
+            <div className="card-body">
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={financialHistory} margin={{ top: 10, right: 10, left: -10, bottom: 5 }}>
+                    <defs>
+                      <linearGradient id="prizeGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="costGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#232328" vertical={false} />
+                    <XAxis dataKey="board" stroke="#71717a" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#71717a" fontSize={11} tickLine={false} tickFormatter={(v) => `R${v}`} />
+                    <Tooltip
+                      formatter={(val: any, name: any) => [
+                        formatZAR(Number(val)),
+                        name === 'cumPrize' ? 'Winnings' : 'Staked',
+                      ]}
+                      labelFormatter={(_label, payload) => payload?.[0]?.payload?.date || ''}
+                      contentStyle={{
+                        backgroundColor: '#131316',
+                        borderColor: '#2e2e34',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#f4f4f5',
+                      }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="cumCost"
+                      stroke="#6366f1"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#costGradient)"
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="cumPrize"
+                      stroke="#10b981"
+                      strokeWidth={2}
+                      fillOpacity={1}
+                      fill="url(#prizeGradient)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="mt-2 flex items-center justify-center gap-6 text-xs text-zinc-400">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-indigo-500" />
+                  Staked (ZAR)
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-sm bg-emerald-400" />
+                  Prizes Won (ZAR)
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Outcome Distribution Donut */}
+          <div className="card">
+            <div className="card-header bg-gradient-to-r from-surface-2 to-surface-3/40">
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                  <Trophy className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="card-title">Outcome ratio</h3>
+                  <p className="card-subtitle">Generated board statuses</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="card-body flex flex-col items-center justify-center">
+              <div className="h-48 w-full relative">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Tooltip
+                      formatter={(val: any, name: any) => [`${val} boards`, name]}
+                      contentStyle={{
+                        backgroundColor: '#131316',
+                        borderColor: '#2e2e34',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        color: '#f4f4f5',
+                      }}
+                    />
+                    <Pie
+                      data={outcomePieData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={42}
+                      outerRadius={62}
+                      paddingAngle={3}
+                      dataKey="value"
+                      stroke="#131316"
+                      strokeWidth={2}
+                    >
+                      {outcomePieData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center pointer-events-none">
+                  <span className="text-base font-bold font-mono text-emerald-400">{hitRate.toFixed(0)}%</span>
+                  <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Hit Rate</span>
+                </div>
+              </div>
+
+              <div className="w-full space-y-1.5 mt-1">
+                {outcomePieData.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5 font-mono text-zinc-300">
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: item.color }} />
+                      {item.name}
+                    </span>
+                    <span className="num font-semibold text-zinc-200">{item.value} boards</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Filter Toolbar */}
-      <div className="card card-body flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="card card-body flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between bg-gradient-to-r from-surface-2 via-surface-2 to-surface-3/30">
         <div className="flex flex-wrap items-center gap-2">
           <Segmented
             options={gameFilterOptions}

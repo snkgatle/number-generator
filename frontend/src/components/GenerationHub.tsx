@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BallRow } from './Ball';
+import { Ball, BallRow } from './Ball';
 import {
   generateBoards,
   fetchGameStatistics,
@@ -230,39 +230,27 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
           ) : stats ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               {/* Hot Numbers */}
-              <div className="inset p-3.5 space-y-2">
+              <div className="inset p-3.5 space-y-2 border-l-2 border-l-amber-500/80 bg-surface-1/70">
                 <div className="flex items-center gap-1.5 text-xs font-medium text-amber-400">
                   <Flame className="h-3.5 w-3.5" />
                   <span>Frequent numbers</span>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {stats.hot_numbers.slice(0, 7).map((n) => (
-                    <span
-                      key={n.number}
-                      className="badge badge-neutral num"
-                      title={`Drawn ${n.count} times (${n.percentage}%)`}
-                    >
-                      {n.number}
-                    </span>
+                    <Ball key={n.number} number={n.number} size="sm" />
                   ))}
                 </div>
               </div>
 
               {/* Cold Numbers */}
-              <div className="inset p-3.5 space-y-2">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-400">
-                  <Snowflake className="h-3.5 w-3.5 text-sky-400" />
+              <div className="inset p-3.5 space-y-2 border-l-2 border-l-sky-500/80 bg-surface-1/70">
+                <div className="flex items-center gap-1.5 text-xs font-medium text-sky-400">
+                  <Snowflake className="h-3.5 w-3.5" />
                   <span>Infrequent numbers</span>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex flex-wrap gap-1.5">
                   {stats.cold_numbers.slice(0, 7).map((n) => (
-                    <span
-                      key={n.number}
-                      className="badge badge-neutral num text-zinc-400"
-                      title={`Drawn ${n.count} times (${n.percentage}%)`}
-                    >
-                      {n.number}
-                    </span>
+                    <Ball key={n.number} number={n.number} size="sm" />
                   ))}
                 </div>
               </div>

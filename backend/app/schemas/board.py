@@ -133,6 +133,10 @@ class AIGenerationResponse(BaseModel):
         ...,
         description="High-level statistical summary across the recent draw window",
     )
+    pool: Optional[List[int]] = Field(
+        default=None,
+        description="Directive 18: High-confidence candidate pool (10-14 numbers) for combinatorial wheeling",
+    )
 
     def validate_against_game_rules(self) -> None:
         """Validates all generated boards against official game matrix rules."""

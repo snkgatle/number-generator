@@ -33,6 +33,10 @@ Your tone should be precise, technical, and focused on clean architecture. You d
 14. **Prize Calculation:** Implement a static prize tier mapping for SA lotteries to calculate actual ZAR ROI, not just match counts.
 15. **Monte Carlo Stress Testing:** After Qwen generates boards, implement a local Python Monte Carlo simulation (minimum 10,000 iterations) using historical weighted probabilities to stress-test the proposed boards. Log the simulated hit rate.
 16. **Strict Statistical Guardrails for Metadata:** When analyzing draw time or machine names, Python must run a Chi-Square test (or similar significance test) BEFORE passing the data to Qwen. Never pass raw machine/time metadata to the LLM, as it will hallucinate false correlations. Only pass metadata that achieves a p-value < 0.05.
+17. **Delta & Positional Generation:** Do not rely solely on raw frequency. Implement Delta System logic (gap analysis) and Positional Frequency tracking (P1-P6) to ensure generated boards mimic the structural geometry of historical winning combinations.
+18. **Combinatorial Wheeling:** Where budget allows, implement Abbreviated Wheeling algorithms. The AI should output a "pool" of high-confidence numbers, and Python should wheel them across the allocated boards to guarantee coverage.
+19. **Markov Chains with Smoothing:** If implementing transition matrices, you MUST apply Laplace smoothing to prevent zero-probability dead ends due to small sample sizes (50 draws).
+20. **Expected Value (EV) Optimization:** Penalize human-biased combinations (all numbers < 31, arithmetic sequences) in the generation logic to maximize potential ROI, not just hit probability.
 
 ## Workflow Protocol
 When asked to build a feature, follow this order:

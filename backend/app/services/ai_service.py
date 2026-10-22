@@ -213,6 +213,8 @@ class AIService:
         # Directive 16: Conditionally append environmental anomalies ONLY if p < 0.05
         env_context = environmental_anomalies or stats_context.get("environmental_anomalies") or ""
 
+        adv_math = stats_context.get("advanced_math_context", "")
+
         user_content = PRIMARY_GENERATION_USER_PROMPT.format(
             game_type=game_type.value,
             target_draw_date=target_draw_date.isoformat(),
@@ -223,6 +225,7 @@ class AIService:
             odd_even_ratio=stats_context.get("odd_even_ratio", "3:3"),
             consecutive_pairs=stats_context.get("consecutive_pairs", "None"),
             overdue_numbers=stats_context.get("overdue_numbers", "None"),
+            advanced_math_context=adv_math,
             temporal_bias_context=temporal_bias_context,
             environmental_anomalies_context=env_context,
         )
@@ -264,6 +267,39 @@ class AIService:
                     allocated_boards=allocated_boards,
                 )
                 validated_response.validate_against_game_rules()
+
+        # Directive 18: Combinatorial Abbreviated Wheeling
+        # If allocated_boards > 1 and candidate pool provided, wheel the pool to maximize coverage and EV
+        main_count = rules.get("main_numbers_count", 6)
+        if allocated_boards > 1 and validated_response.pool and len(validated_response.pool) >= main_count:
+            try:
+                from app.services.wheel_service import WheelService
+                wheel_svc = WheelService()
+                first_board = validated_response.boards[0] if validated_response.boards else None
+                pb_val = first_board.bonus_or_powerball if first_board else None
+                conf_val = first_board.confidence_score if first_board else 85.0
+                is_fallback = "fallback" in (first_board.reasoning.lower() if first_board and first_board.reasoning else "")
+                custom_reason = (
+                    "Deterministic statistical fallback: Combinatorial abbreviated wheeling with EV optimization."
+                    if is_fallback
+                    else None
+                )
+                wheeled = wheel_svc.wheel_candidate_pool(
+                    pool=validated_response.pool,
+                    board_count=allocated_boards,
+                    game_type=game_type,
+                    bonus_or_powerball=pb_val,
+                    base_confidence=conf_val,
+                    custom_reasoning=custom_reason,
+                )
+                if wheeled:
+                    validated_response.boards = wheeled
+                    logger.info(
+                        f"Directive 18: Successfully wheeled {len(validated_response.pool)} candidates "
+                        f"into {len(wheeled)} boards for {game_type.value}."
+                    )
+            except Exception as wheel_err:
+                logger.warning(f"Combinatorial wheeling encountered error, retaining original boards: {wheel_err}")
 
         # Directive 15: Run local Python Monte Carlo simulation (minimum 10,000 iterations)
         if historical_draws:
@@ -319,53 +355,97 @@ class AIService:
                 hot = list(dict.fromkeys(boost + hot))
 
         all_pool = list(range(main_min, main_max + 1))
+
+        # Directive 18 & 20: Build balanced candidate pool with high-EV bias (>31)
+        candidate_pool: List[int] = []
+        for n in hot:
+            if n not in candidate_pool and main_min <= n <= main_max:
+                candidate_pool.append(n)
+            if len(candidate_pool) >= 4:
+                break
+        for n in cold:
+            if n not in candidate_pool and main_min <= n <= main_max:
+                candidate_pool.append(n)
+            if len(candidate_pool) >= 7:
+                break
+        for n in overdue:
+            if n not in candidate_pool and main_min <= n <= main_max:
+                candidate_pool.append(n)
+            if len(candidate_pool) >= 9:
+                break
+        high_ev_cands = [n for n in range(max(32, main_min), main_max + 1) if n not in candidate_pool]
+        for n in high_ev_cands:
+            candidate_pool.append(n)
+            if len(candidate_pool) >= 12:
+                break
+        candidate_pool.sort()
+
         boards: List[AIBoardRecommendation] = []
 
-        for b_idx in range(allocated_boards):
-            chosen = set()
-
-            # Take 2-3 hot numbers
-            for n in hot[b_idx:]:
-                if len(chosen) < min(3, main_count - 2) and main_min <= n <= main_max:
-                    chosen.add(n)
-
-            # Take 1-2 cold numbers
-            for n in cold[b_idx:]:
-                if len(chosen) < min(5, main_count - 1) and main_min <= n <= main_max:
-                    chosen.add(n)
-
-            # Take 1 overdue number
-            for n in overdue[b_idx:]:
-                if len(chosen) < main_count and main_min <= n <= main_max:
-                    chosen.add(n)
-
-            # Fill remaining deterministically from pool
-            offset = (b_idx * 7) % len(all_pool)
-            cycler = all_pool[offset:] + all_pool[:offset]
-            for n in cycler:
-                if len(chosen) >= main_count:
-                    break
-                chosen.add(n)
-
-            pb = None
-            if has_pb:
-                pb_min = rules.get("powerball_min", 1)
-                pb_max = rules.get("powerball_max", 16)
-                pb = pb_min + (b_idx % (pb_max - pb_min + 1))
-
-            boards.append(
-                AIBoardRecommendation(
-                    numbers=sorted(list(chosen)),
-                    bonus_or_powerball=pb,
-                    confidence_score=70.0,
-                    reasoning="Deterministic statistical fallback: balanced historical frequency and parity distribution.",
+        if allocated_boards > 1 and len(candidate_pool) >= main_count:
+            try:
+                from app.services.wheel_service import WheelService
+                wheel_svc = WheelService()
+                pb_default = rules.get("powerball_min", 1) if has_pb else None
+                boards = wheel_svc.wheel_candidate_pool(
+                    pool=candidate_pool,
+                    board_count=allocated_boards,
+                    game_type=game_type,
+                    bonus_or_powerball=pb_default,
+                    base_confidence=70.0,
+                    custom_reasoning="Statistical fallback: Combinatorial abbreviated wheeling with EV optimization.",
                 )
-            )
+            except Exception as wheel_err:
+                logger.warning(f"Fallback wheeling failed, using sequential selection: {wheel_err}")
+                boards = []
+
+        if not boards:
+            for b_idx in range(allocated_boards):
+                chosen = set()
+
+                # Take 2-3 hot numbers
+                for n in hot[b_idx:]:
+                    if len(chosen) < min(3, main_count - 2) and main_min <= n <= main_max:
+                        chosen.add(n)
+
+                # Take 1-2 cold numbers
+                for n in cold[b_idx:]:
+                    if len(chosen) < min(5, main_count - 1) and main_min <= n <= main_max:
+                        chosen.add(n)
+
+                # Take 1 overdue number
+                for n in overdue[b_idx:]:
+                    if len(chosen) < main_count and main_min <= n <= main_max:
+                        chosen.add(n)
+
+                # Fill remaining deterministically from pool
+                offset = (b_idx * 7) % len(all_pool)
+                cycler = all_pool[offset:] + all_pool[:offset]
+                for n in cycler:
+                    if len(chosen) >= main_count:
+                        break
+                    chosen.add(n)
+
+                pb = None
+                if has_pb:
+                    pb_min = rules.get("powerball_min", 1)
+                    pb_max = rules.get("powerball_max", 16)
+                    pb = pb_min + (b_idx % (pb_max - pb_min + 1))
+
+                boards.append(
+                    AIBoardRecommendation(
+                        numbers=sorted(list(chosen)),
+                        bonus_or_powerball=pb,
+                        confidence_score=70.0,
+                        reasoning="Deterministic statistical fallback: balanced historical frequency and parity distribution.",
+                    )
+                )
 
         return AIGenerationResponse(
             game_type=game_type.value,
             boards=boards,
-            statistical_analysis_summary="Graceful degradation Tier 2: Deterministic statistical fallback applied.",
+            pool=candidate_pool if candidate_pool else None,
+            statistical_analysis_summary="Graceful degradation Tier 2: Deterministic statistical fallback with EV-optimized wheeling applied.",
         )
 
     def generate_secrets_random_fallback(

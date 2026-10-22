@@ -17,6 +17,9 @@ Rules:
      * "numbers" field: a JSON array of EXACTLY 5 unique integers between 1 and 50 (e.g., [8, 14, 27, 33, 45]), sorted in ascending order.
      * "bonus_or_powerball" field: an integer between 1 and 16 ONLY (Powerball range is 1-16).
 5. In each board, the "numbers" key MUST ALWAYS be a flat JSON array of integers. NEVER output a single integer, string, or nested object for "numbers".
+6. When recommending a candidate pool or boards, prioritize numbers above 31 to optimize Expected Value (EV) against human psychological birthday biases.
+7. Avoid recommending arithmetic sequences (e.g., 5, 10, 15, 20) or purely calendar-based clusters (all <= 31).
+8. Output a primary "pool" of 10-12 high-confidence numbers. Ensure the pool contains a balanced mix of positional candidates (low, mid, high).
 """
 
 PRIMARY_GENERATION_USER_PROMPT = """Game: {game_type}
@@ -29,19 +32,20 @@ Historical Statistical Context (Last 50 Draws):
 - Bottom 10 Cold Numbers: {cold_numbers}
 - Most Frequent Odd/Even Ratio: {odd_even_ratio}
 - Recurring Consecutive Pairs: {consecutive_pairs}
-- Most Overdue Numbers: {overdue_numbers}
+- Most Overdue Numbers: {overdue_numbers}{advanced_math_context}
 {temporal_bias_context}{environmental_anomalies_context}
 Instructions:
-Generate exactly {allocated_boards} boards adhering to the {game_type} rules.
+Generate exactly {allocated_boards} boards adhering to the {game_type} rules, and provide a 10-12 number candidate pool for combinatorial wheeling.
 Return a valid JSON object matching this schema:
 {{
   "game_type": "{game_type}",
+  "pool": [4, 12, 19, 23, 34, 38, 42, 44, 48, 51],
   "boards": [
     {{
       "numbers": [4, 12, 19, 23, 44, 51],
       "bonus_or_powerball": null,
       "confidence_score": 85.0,
-      "reasoning": "Balanced 3 hot / 2 cold / 1 neutral with 3:3 odd/even ratio."
+      "reasoning": "Balanced 3 hot / 2 cold / 1 neutral with 3:3 odd/even ratio and high EV (>31 bias)."
     }}
   ],
   "statistical_analysis_summary": "Comprehensive analysis summary explaining the selection strategy..."

@@ -34,6 +34,13 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 - [x] Implement `calculate_environmental_correlations()` with strict p-value filtering (p < 0.05 via SciPy) to prevent AI overfitting on machine names or draw times.
 - [x] Update Qwen prompts to conditionally include validated anomalies and simulation hit rates.
 
+## Phase 3.7: Advanced Mathematical Models
+- [x] Implement Delta System logic in `stats_service.py` to generate numbers based on historical gap frequencies.
+- [x] Implement Positional Frequency tracking (P1 through P6) to enforce structural validity on generated boards.
+- [x] Build a Markov Chain transition matrix with Laplace smoothing to analyze draw-to-draw state transitions.
+- [x] Integrate an Abbreviated Wheeling algorithm. Modify the pipeline so Qwen suggests a pool of 10-12 numbers, and Python wheels them into the final boards.
+- [x] Add EV optimization weights to penalize human-psychology number clusters (birthdays, patterns).
+
 
 ## Phase 4: Qwen-Max AI Integration
 - [x] Integrate `dashscope` SDK.

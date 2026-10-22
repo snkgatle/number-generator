@@ -1,4 +1,7 @@
+from collections import Counter
 import itertools
+import math
+import statistics
 from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 import numpy as np
@@ -10,9 +13,16 @@ from app.models.draw import Draw
 from app.schemas.board import AIBoardRecommendation
 from app.schemas.enums import GAME_RULES, GameType
 from app.schemas.stats import (
+    DeltaDistributionReport,
+    DeltaFrequency,
     EnvironmentalAnalysisReport,
     EnvironmentalCorrelation,
+    EVScoreReport,
+    MarkovChainReport,
+    MarkovTransitionCandidate,
     MonteCarloSimulationResult,
+    PositionalDistribution,
+    PositionalFrequencyReport,
     StatisticalAnalysisResponse,
 )
 from app.stats.analyzer import generate_statistical_summary
@@ -44,7 +54,9 @@ class StatsService:
         return generate_statistical_summary(draws, game_type)
 
     def format_prompt_variables(
-        self, stats: StatisticalAnalysisResponse
+        self,
+        stats: StatisticalAnalysisResponse,
+        draws: Optional[List[Draw]] = None,
     ) -> Dict[str, str]:
         """Converts statistical analysis into formatted strings for Qwen-Max prompt templates."""
         ctx = stats.llm_prompt_context
@@ -65,13 +77,40 @@ class StatsService:
             else "None detected"
         )
 
-        return {
+        res = {
             "hot_numbers": hot_str,
             "cold_numbers": cold_str,
             "odd_even_ratio": ctx.odd_even_ratio,
             "consecutive_pairs": pairs_str,
             "overdue_numbers": overdue_str,
         }
+
+        if draws:
+            adv_parts = []
+            try:
+                delta_rep = self.calculate_delta_distribution(draws, stats.game_type)
+                if delta_rep.top_deltas:
+                    top_d_str = ", ".join(f"{d.delta} ({d.percentage}%)" for d in delta_rep.top_deltas[:4])
+                    adv_parts.append(
+                        f"\n- Delta Gap Frequencies: Mean={delta_rep.mean_delta:.1f}, Top Deltas: {top_d_str}"
+                    )
+            except Exception as e:
+                logger.debug(f"Delta context formatting skipped: {e}")
+
+            try:
+                markov_rep = self.build_markov_transition_matrix(draws, stats.game_type, alpha=1.0)
+                if markov_rep.top_transition_candidates:
+                    top_m_str = ", ".join(str(c.number) for c in markov_rep.top_transition_candidates[:5])
+                    adv_parts.append(
+                        f"- Markov Transition Candidates (Laplace smoothed): {top_m_str}"
+                    )
+            except Exception as e:
+                logger.debug(f"Markov context formatting skipped: {e}")
+
+            if adv_parts:
+                res["advanced_math_context"] = "\n".join(adv_parts)
+
+        return res
 
     def calculate_environmental_correlations(
         self, draws: List[Draw], min_samples: int = 15
@@ -260,3 +299,370 @@ class StatsService:
             )
 
         return results
+
+    # ==============================================================================
+    # Phase 3.7: Advanced Mathematical Models (Directives 17 - 20)
+    # ==============================================================================
+
+    def calculate_delta_distribution(
+        self, draws: List[Draw], game_type: GameType
+    ) -> DeltaDistributionReport:
+        """Directive 17: Delta System logic (gap analysis) across historical draws.
+
+        Calculates gap distributions (delta_1 = n_1, delta_i = n_i - n_{i-1})
+        to ensure generated boards mimic historical winning geometries.
+        """
+        rules = GAME_RULES.get(game_type, {})
+        main_count = rules.get("main_numbers_count", 6)
+
+        all_deltas: List[int] = []
+        positional_delta_lists: Dict[str, List[int]] = {
+            f"delta_{i + 1}": [] for i in range(main_count)
+        }
+
+        valid_draw_count = 0
+        for d in draws:
+            if not d.numbers or len(d.numbers) < main_count:
+                continue
+            sorted_nums = sorted(d.numbers)[:main_count]
+            valid_draw_count += 1
+
+            # delta_1 = first number (distance from 0)
+            d1 = sorted_nums[0]
+            all_deltas.append(d1)
+            positional_delta_lists["delta_1"].append(d1)
+
+            # delta_i = n_i - n_{i-1}
+            for i in range(1, main_count):
+                delta_val = sorted_nums[i] - sorted_nums[i - 1]
+                all_deltas.append(delta_val)
+                positional_delta_lists[f"delta_{i + 1}"].append(delta_val)
+
+        if not all_deltas:
+            # Fallback default report if no draws available
+            return DeltaDistributionReport(
+                game_type=game_type,
+                sample_size=0,
+                mean_delta=8.0,
+                median_delta=7.0,
+                std_delta=4.0,
+                min_delta=1,
+                max_delta=25,
+                top_deltas=[],
+                positional_delta_means={},
+            )
+
+        mean_delta = float(np.mean(all_deltas))
+        median_delta = float(np.median(all_deltas))
+        std_delta = float(np.std(all_deltas))
+        min_delta = int(np.min(all_deltas))
+        max_delta = int(np.max(all_deltas))
+
+        # Top frequent delta values
+        counter = Counter(all_deltas)
+        total_deltas = len(all_deltas)
+        top_deltas = [
+            DeltaFrequency(
+                delta=d_val,
+                count=cnt,
+                percentage=round((cnt / total_deltas) * 100.0, 2),
+            )
+            for d_val, cnt in counter.most_common(10)
+        ]
+
+        pos_means = {
+            k: round(float(np.mean(v)), 2) if v else 0.0
+            for k, v in positional_delta_lists.items()
+        }
+
+        return DeltaDistributionReport(
+            game_type=game_type,
+            sample_size=valid_draw_count,
+            mean_delta=round(mean_delta, 2),
+            median_delta=round(median_delta, 2),
+            std_delta=round(std_delta, 2),
+            min_delta=min_delta,
+            max_delta=max_delta,
+            top_deltas=top_deltas,
+            positional_delta_means=pos_means,
+        )
+
+    def calculate_positional_frequencies(
+        self, draws: List[Draw], game_type: GameType
+    ) -> PositionalFrequencyReport:
+        """Directive 17: Positional Frequency tracking (P1-P6).
+
+        Tracks structural distributions for each ball position and calculates
+        plausible geometric boundaries within 2.5 sigma.
+        """
+        rules = GAME_RULES.get(game_type, {})
+        main_count = rules.get("main_numbers_count", 6)
+        main_min = rules.get("main_number_min", 1)
+        main_max = rules.get("main_number_max", 52)
+
+        position_numbers: Dict[str, List[int]] = {
+            f"P{i + 1}": [] for i in range(main_count)
+        }
+
+        valid_count = 0
+        for d in draws:
+            if not d.numbers or len(d.numbers) < main_count:
+                continue
+            sorted_nums = sorted(d.numbers)[:main_count]
+            valid_count += 1
+            for i, num in enumerate(sorted_nums):
+                position_numbers[f"P{i + 1}"].append(num)
+
+        positions_report: Dict[str, PositionalDistribution] = {}
+        validity_bounds: Dict[str, List[int]] = {}
+
+        for i in range(main_count):
+            pos_key = f"P{i + 1}"
+            nums = position_numbers[pos_key]
+            if nums:
+                mean_val = float(np.mean(nums))
+                med_val = float(np.median(nums))
+                std_val = float(np.std(nums)) if len(nums) > 1 else 1.0
+                min_val = int(np.min(nums))
+                max_val = int(np.max(nums))
+                top_common = [n for n, _ in Counter(nums).most_common(5)]
+
+                # Plausible structural bounds within +/- 2.5 sigma
+                lower_bound = max(main_min, int(round(mean_val - 2.5 * std_val)))
+                upper_bound = min(main_max, int(round(mean_val + 2.5 * std_val)))
+                # Position index consistency constraint: lower bound cannot be less than pos_idx + 1
+                lower_bound = max(lower_bound, i + 1)
+                upper_bound = min(upper_bound, main_max - (main_count - 1 - i))
+                if lower_bound > upper_bound:
+                    lower_bound, upper_bound = min_val, max_val
+            else:
+                # Default positional heuristics
+                mean_val = main_min + (i * ((main_max - main_min) / main_count))
+                med_val = mean_val
+                std_val = 5.0
+                min_val = main_min + i
+                max_val = main_max - (main_count - 1 - i)
+                top_common = []
+                lower_bound = min_val
+                upper_bound = max_val
+
+            positions_report[pos_key] = PositionalDistribution(
+                position=pos_key,
+                mean=round(mean_val, 2),
+                median=round(med_val, 2),
+                min_value=min_val,
+                max_value=max_val,
+                std_dev=round(std_val, 2),
+                most_common_numbers=top_common,
+            )
+            validity_bounds[pos_key] = [lower_bound, upper_bound]
+
+        return PositionalFrequencyReport(
+            game_type=game_type,
+            sample_size=valid_count,
+            positions=positions_report,
+            structural_validity_bounds=validity_bounds,
+        )
+
+    def validate_positional_structure(
+        self, numbers: List[int], bounds: Dict[str, List[int]]
+    ) -> bool:
+        """Validates that a board's sorted numbers respect positional structural bounds."""
+        sorted_nums = sorted(numbers)
+        for i, num in enumerate(sorted_nums):
+            pos_key = f"P{i + 1}"
+            if pos_key in bounds:
+                b_min, b_max = bounds[pos_key]
+                if not (b_min <= num <= b_max):
+                    return False
+        return True
+
+    def build_markov_transition_matrix(
+        self, draws: List[Draw], game_type: GameType, alpha: float = 1.0
+    ) -> MarkovChainReport:
+        """Directive 19: Markov chain transition matrix with Laplace smoothing.
+
+        Applies Laplace smoothing (alpha=1.0) across all states to eliminate
+        zero-probability dead ends on finite samples (e.g. 50 draws).
+        """
+        rules = GAME_RULES.get(game_type, {})
+        m_max = rules.get("main_number_max", 52)
+
+        # Sort draws chronologically (oldest to latest)
+        chrono_draws = sorted(
+            draws, key=lambda d: (d.draw_date, d.draw_number or 0)
+        )
+
+        # Count transition occurrences C[u][v]
+        count_matrix = np.zeros((m_max + 1, m_max + 1), dtype=float)
+
+        for t in range(len(chrono_draws) - 1):
+            cur_nums = [n for n in chrono_draws[t].numbers if 1 <= n <= m_max]
+            nxt_nums = [n for n in chrono_draws[t + 1].numbers if 1 <= n <= m_max]
+            for u in cur_nums:
+                for v in nxt_nums:
+                    count_matrix[u, v] += 1.0
+
+        # Apply Laplace Smoothing: P(v|u) = (C[u, v] + alpha) / (sum_v C[u, v] + M * alpha)
+        trans_probs = np.zeros((m_max + 1, m_max + 1), dtype=float)
+        for u in range(1, m_max + 1):
+            row_sum = np.sum(count_matrix[u, 1:]) + (m_max * alpha)
+            trans_probs[u, 1:] = (count_matrix[u, 1:] + alpha) / row_sum
+
+        latest_nums: List[int] = []
+        top_candidates: List[MarkovTransitionCandidate] = []
+
+        if chrono_draws:
+            latest_nums = sorted([n for n in chrono_draws[-1].numbers if 1 <= n <= m_max])
+            # Calculate aggregate transition probability for each candidate v in 1..m_max
+            candidate_scores: List[MarkovTransitionCandidate] = []
+            for v in range(1, m_max + 1):
+                # Average transition probability from numbers in the latest draw
+                probs = [trans_probs[u, v] for u in latest_nums]
+                avg_p = float(np.mean(probs)) if probs else 1.0 / m_max
+                # Identify prior numbers giving highest transition probability to v
+                supporting = sorted(
+                    latest_nums, key=lambda u: trans_probs[u, v], reverse=True
+                )[:2]
+                candidate_scores.append(
+                    MarkovTransitionCandidate(
+                        number=v,
+                        probability=round(avg_p, 4),
+                        supporting_prior_numbers=supporting,
+                    )
+                )
+
+            # Sort descending by probability
+            candidate_scores.sort(key=lambda c: c.probability, reverse=True)
+            top_candidates = candidate_scores[:12]
+
+        return MarkovChainReport(
+            game_type=game_type,
+            sample_size=len(chrono_draws),
+            alpha=alpha,
+            matrix_dimension=m_max,
+            top_transition_candidates=top_candidates,
+            latest_draw_numbers=latest_nums,
+        )
+
+    def calculate_ev_score(
+        self, numbers: List[int], game_type: Optional[GameType] = None
+    ) -> EVScoreReport:
+        """Directive 20: Expected Value (EV) Optimization.
+
+        Penalizes human-biased combinations (all numbers <= 31, arithmetic sequences,
+        and obvious consecutive clusters) to maximize potential non-shared jackpot ROI.
+        """
+        sorted_nums = sorted(numbers)
+        k = len(sorted_nums)
+        if k == 0:
+            return EVScoreReport(
+                numbers=[],
+                ev_score=50.0,
+                is_human_biased=True,
+                calendar_count=0,
+                calendar_ratio=0.0,
+                is_arithmetic_sequence=False,
+                has_consecutive_run=False,
+                penalties=["Empty board"],
+                recommendation="Empty board cannot be scored.",
+            )
+
+        score = 80.0
+        penalties: List[str] = []
+
+        # 1. Calendar numbers bias (numbers <= 31: birthdays/anniversaries)
+        cal_count = sum(1 for n in sorted_nums if n <= 31)
+        cal_ratio = cal_count / k
+
+        if cal_ratio == 1.0:
+            score -= 40.0
+            penalties.append("100% calendar numbers (all <= 31): extreme human birthday bias.")
+        elif cal_ratio >= 0.8:
+            score -= 22.0
+            penalties.append(f"Heavy calendar bias ({cal_count}/{k} numbers <= 31).")
+        elif cal_ratio <= 0.35:
+            # Numbers > 31 are underplayed by the general public -> higher EV!
+            score += 12.0
+
+        # 2. Arithmetic sequence detection (e.g. 5, 10, 15, 20, 25, 30 or 2, 4, 6, 8, 10, 12)
+        is_arithmetic = False
+        if k >= 3:
+            deltas = [sorted_nums[i] - sorted_nums[i - 1] for i in range(1, k)]
+            if len(set(deltas)) == 1:
+                is_arithmetic = True
+                score -= 40.0
+                penalties.append(f"Exact arithmetic progression (constant delta={deltas[0]}).")
+
+        # 3. Consecutive runs (e.g. 14, 15, 16)
+        has_consecutive = False
+        max_run = 1
+        current_run = 1
+        for i in range(1, k):
+            if sorted_nums[i] == sorted_nums[i - 1] + 1:
+                current_run += 1
+                if current_run > max_run:
+                    max_run = current_run
+            else:
+                current_run = 1
+
+        if max_run >= 3:
+            has_consecutive = True
+            score -= 18.0
+            penalties.append(f"Consecutive run of {max_run} adjacent numbers.")
+
+        # 4. Common factor / multiple check (e.g. all multiples of 5 or 7)
+        g = sorted_nums[0]
+        for n in sorted_nums[1:]:
+            g = math.gcd(g, n)
+        if g > 1:
+            score -= 15.0
+            penalties.append(f"All board numbers share common divisor {g}.")
+
+        ev_score = round(max(0.0, min(100.0, score)), 2)
+        is_biased = bool(cal_ratio == 1.0 or is_arithmetic or max_run >= 4 or ev_score < 50.0)
+
+        if is_biased:
+            recommendation = (
+                "Sub-optimal EV: contains high human-bias patterns prone to severe prize sharing."
+            )
+        elif ev_score >= 80.0:
+            recommendation = (
+                "Excellent EV: non-calendar heavy distribution maximizing non-shared jackpot potential."
+            )
+        else:
+            recommendation = "Balanced EV: moderate human bias risk."
+
+        return EVScoreReport(
+            numbers=sorted_nums,
+            ev_score=ev_score,
+            is_human_biased=is_biased,
+            calendar_count=cal_count,
+            calendar_ratio=round(cal_ratio, 3),
+            is_arithmetic_sequence=is_arithmetic,
+            has_consecutive_run=has_consecutive,
+            penalties=penalties,
+            recommendation=recommendation,
+        )
+
+    async def get_delta_distribution(
+        self, db: AsyncSession, game_type: GameType, sample_size: int = 50
+    ) -> DeltaDistributionReport:
+        """Asynchronously retrieves recent draws and computes delta gap distribution."""
+        draws = await self.get_recent_draws(db, game_type, limit=sample_size)
+        return self.calculate_delta_distribution(draws, game_type)
+
+    async def get_positional_frequencies(
+        self, db: AsyncSession, game_type: GameType, sample_size: int = 50
+    ) -> PositionalFrequencyReport:
+        """Asynchronously retrieves recent draws and computes positional frequency report."""
+        draws = await self.get_recent_draws(db, game_type, limit=sample_size)
+        return self.calculate_positional_frequencies(draws, game_type)
+
+    async def get_markov_chain(
+        self, db: AsyncSession, game_type: GameType, sample_size: int = 50, alpha: float = 1.0
+    ) -> MarkovChainReport:
+        """Asynchronously retrieves recent draws and builds Laplace-smoothed Markov chain."""
+        draws = await self.get_recent_draws(db, game_type, limit=sample_size)
+        return self.build_markov_transition_matrix(draws, game_type, alpha=alpha)
+

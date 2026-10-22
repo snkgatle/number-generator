@@ -107,3 +107,51 @@ def test_setup_logging():
     std_logger.info("Test intercepted log message")
     logger.info("Direct loguru test message")
 
+
+@pytest.mark.asyncio
+async def test_stats_deltas_endpoint(client):
+    """Test /api/v1/stats/{game_type}/deltas returns DeltaDistributionReport."""
+    response = await client.get("/api/v1/stats/LOTTO/deltas?sample_size=10")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["game_type"] == "LOTTO"
+    assert "mean_delta" in data
+    assert "top_deltas" in data
+
+
+@pytest.mark.asyncio
+async def test_stats_positional_endpoint(client):
+    """Test /api/v1/stats/{game_type}/positional returns PositionalFrequencyReport."""
+    response = await client.get("/api/v1/stats/LOTTO/positional?sample_size=10")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["game_type"] == "LOTTO"
+    assert "positions" in data
+    assert "structural_validity_bounds" in data
+
+
+@pytest.mark.asyncio
+async def test_stats_markov_endpoint(client):
+    """Test /api/v1/stats/{game_type}/markov returns MarkovChainReport."""
+    response = await client.get("/api/v1/stats/LOTTO/markov?sample_size=10&alpha=1.0")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["game_type"] == "LOTTO"
+    assert data["alpha"] == 1.0
+    assert "top_transition_candidates" in data
+
+
+@pytest.mark.asyncio
+async def test_stats_ev_score_endpoint(client):
+    """Test /api/v1/stats/ev-score calculates Expected Value penalty report."""
+    response = await client.post(
+        "/api/v1/stats/ev-score",
+        json={"numbers": [4, 12, 19, 23, 44, 51]},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "ev_score" in data
+    assert "is_human_biased" in data
+    assert "calendar_count" in data
+
+

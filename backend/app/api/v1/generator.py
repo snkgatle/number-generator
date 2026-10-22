@@ -107,7 +107,7 @@ async def generate_boards(
     # Phase 3: Statistical Pre-Processing (Executed locally in Python before calling LLM)
     recent_draws = await stats_service.get_recent_draws(db, payload.game_type, limit=50)
     stats = await stats_service.get_stats_for_game(db, payload.game_type, sample_size=50)
-    prompt_vars = stats_service.format_prompt_variables(stats)
+    prompt_vars = stats_service.format_prompt_variables(stats, draws=recent_draws)
 
     # Directive 16: Guardrailed environmental metadata test (p < 0.05 only)
     env_report = stats_service.calculate_environmental_correlations(recent_draws)

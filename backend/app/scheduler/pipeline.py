@@ -118,9 +118,10 @@ class PipelineOrchestrator:
 
             logger.info(f"Processing pre-draw analysis for {game.value}...")
 
-            # Statistical Pre-Processing (Phase 3)
+            # Statistical Pre-Processing (Phase 3 & 3.7)
+            recent_draws = await self.stats_service.get_recent_draws(db, game, limit=50)
             stats = await self.stats_service.get_stats_for_game(db, game, sample_size=50)
-            stats_vars = self.stats_service.format_prompt_variables(stats)
+            stats_vars = self.stats_service.format_prompt_variables(stats, draws=recent_draws)
 
             # Determine board allocation using confidence engine (Phase 5)
             allocation = await self.budget_engine.calculate_confidence_allocation(
@@ -131,8 +132,6 @@ class PipelineOrchestrator:
             if boards_to_generate <= 0:
                 logger.info(f"Allocation for {game.value} is 0 boards. Skipping.")
                 continue
-
-            recent_draws = await self.stats_service.get_recent_draws(db, game, limit=50)
 
             # Directive 16: Check environmental correlations with Chi-Square (p < 0.05 only)
             env_report = self.stats_service.calculate_environmental_correlations(recent_draws)

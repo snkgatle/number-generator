@@ -54,10 +54,17 @@ class AIServiceError(Exception):
 class AIService:
     """Orchestrates structured probabilistic analysis and generation via Qwen-Max."""
 
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        analytics_model: Optional[str] = None,
+    ):
         self.api_key = api_key or settings.DASHSCOPE_API_KEY
         self.base_url = (base_url or settings.DASHSCOPE_BASE_URL).rstrip("/")
-        self.model = settings.QWEN_MODEL or Generation.Models.qwen_max
+        self.model = model or settings.QWEN_MODEL or Generation.Models.qwen_max
+        self.analytics_model = analytics_model or settings.QWEN_ANALYTICS_MODEL or "qwen3.8-flash"
 
     @staticmethod
     def clean_json_markdown(raw_text: str) -> str:
@@ -77,15 +84,19 @@ class AIService:
         reraise=True,
     )
     async def call_qwen_json(
-        self, messages: List[Dict[str, str]], temperature: float = 0.7
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float = 0.7,
+        model: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Queries Qwen-Max expecting a strictly structured JSON response."""
+        """Queries Qwen expecting a strictly structured JSON response."""
         if not self.api_key:
             raise AIServiceError(
                 "DashScope / Qwen API key is not configured. Set DASHSCOPE_API_KEY in .env."
             )
 
-        logger.debug(f"Dispatching structured query to Qwen ({self.model}) at {self.base_url}...")
+        active_model = model or self.model
+        logger.debug(f"Dispatching structured query to Qwen ({active_model}) at {self.base_url}...")
 
         # If using OpenAI-compatible mode endpoint (e.g., https://maas.qwencloudapi.com/compatible-mode/v1)
         if "compatible-mode" in self.base_url or "chat/completions" in self.base_url or "qwencloudapi" in self.base_url:
@@ -97,7 +108,7 @@ class AIService:
                 "Content-Type": "application/json",
             }
             payload = {
-                "model": self.model,
+                "model": active_model,
                 "messages": messages,
                 "temperature": temperature,
             }
@@ -124,7 +135,7 @@ class AIService:
             # Fallback to DashScope SDK Generation.call
             def _blocking_call():
                 return Generation.call(
-                    model=self.model,
+                    model=active_model,
                     messages=messages,
                     result_format="message",
                     temperature=temperature,
@@ -136,7 +147,7 @@ class AIService:
             if response.status_code != HTTPStatus.OK:
                 err_code = getattr(response, "code", "UNKNOWN_ERROR")
                 err_msg = getattr(response, "message", "No error message provided")
-                logger.error(f"DashScope Qwen-Max error [{response.status_code}]: {err_code} - {err_msg}")
+                logger.error(f"DashScope Qwen error [{response.status_code}]: {err_code} - {err_msg}")
                 raise AIServiceError(f"DashScope API call failed: {err_code} - {err_msg}")
 
             try:
@@ -515,7 +526,7 @@ class AIService:
     ) -> TemporalPatternReviewResponse:
         """Executes weekly pattern discovery comparing short-term variance against baseline."""
         logger.info(
-            f"Invoking Qwen-Max weekly pattern review for {game_type.value} on {analysis_date}"
+            f"Invoking {self.analytics_model} weekly pattern review for {game_type.value} on {analysis_date}"
         )
 
         weekly_freq_str = ", ".join(
@@ -554,7 +565,7 @@ class AIService:
             {"role": "user", "content": user_content},
         ]
 
-        raw_json = await self.call_qwen_json(messages, temperature=0.5)
+        raw_json = await self.call_qwen_json(messages, temperature=0.5, model=self.analytics_model)
 
         try:
             validated_review = TemporalPatternReviewResponse(**raw_json)
@@ -573,7 +584,7 @@ class AIService:
     ) -> TemporalPatternReviewResponse:
         """Executes monthly macro deep-dive reviewing past multi-week summaries."""
         logger.info(
-            f"Invoking Qwen-Max monthly deep dive for {game_type.value} on {analysis_date}"
+            f"Invoking {self.analytics_model} monthly deep dive for {game_type.value} on {analysis_date}"
         )
 
         lines = []
@@ -604,7 +615,7 @@ class AIService:
             {"role": "user", "content": user_content},
         ]
 
-        raw_json = await self.call_qwen_json(messages, temperature=0.5)
+        raw_json = await self.call_qwen_json(messages, temperature=0.5, model=self.analytics_model)
 
         try:
             validated_review = TemporalPatternReviewResponse(**raw_json)

@@ -234,8 +234,8 @@ async def test_generator_circuit_breaker_rejection(client, db_session):
     budget = MonthlyBudget(
         year_month=active_ym,
         total_budget=Decimal("200.00"),
-        total_boards=40,
-        used_boards=40,
+        total_boards=20,
+        used_boards=20,
         remaining_boards=0,
         is_exhausted=True,
     )
@@ -248,3 +248,51 @@ async def test_generator_circuit_breaker_rejection(client, db_session):
     )
     assert res.status_code == 403
     assert "Budget Exhausted" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_analytics_model_dispatch(ai_service):
+    """Verify that temporal pattern reviews dispatch to Qwen3.8-Flash model."""
+    from unittest.mock import AsyncMock
+    from app.schemas.analytics import TemporalMetrics
+
+    assert ai_service.analytics_model == "qwen3.8-flash"
+
+    metrics = TemporalMetrics(
+        sum_average=150.0,
+        sum_std_dev=20.0,
+        parity_ratio="3.0:3.0",
+        frequency_map={"1": 3, "2": 2},
+        co_occurrence_matrix={"1-2": 2},
+        sample_draws_count=5,
+    )
+
+    mock_review_response = {
+        "deviations": ["Short term sum deviation"],
+        "momentum_shifts": ["Mid numbers trending up"],
+        "hot_pairs": ["1-2"],
+        "actionable_bias": {
+            "suggested_sum_range": [120, 160],
+            "favored_parity": "3:3",
+            "boost_numbers": [1, 2],
+            "dampen_numbers": [49, 50],
+        },
+        "summary": "Temporal variance is within standard statistical bounds.",
+    }
+
+    with patch.object(ai_service, "call_qwen_json", new_callable=AsyncMock) as mock_call:
+        mock_call.return_value = mock_review_response
+
+        review = await ai_service.review_weekly_patterns(
+            game_type=GameType.LOTTO,
+            analysis_date=date(2026, 10, 22),
+            weekly_metrics=metrics,
+            monthly_metrics=metrics,
+        )
+
+        assert review.summary == "Temporal variance is within standard statistical bounds."
+        assert review.actionable_bias.favored_parity == "3:3"
+        assert mock_call.call_count == 1
+        # Confirm model='qwen3.8-flash' was explicitly passed
+        call_kwargs = mock_call.call_args.kwargs
+        assert call_kwargs.get("model") == "qwen3.8-flash"

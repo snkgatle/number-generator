@@ -39,7 +39,11 @@ class Settings(BaseSettings):
     )
     QWEN_MODEL: str = Field(
         default="qwen-max",
-        description="Target model identifier",
+        description="Target model identifier for board generation",
+    )
+    QWEN_ANALYTICS_MODEL: str = Field(
+        default="qwen3.8-flash",
+        description="Target model identifier for temporal analytics and pattern reviews",
     )
 
     # Budget & Allocation Rules (Directive 23: R10/board = 20 boards/month)

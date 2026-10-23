@@ -55,9 +55,30 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         await conn.run_sync(Base.metadata.drop_all)
 
 
+from app.services.auth_service import auth_service
+
+
 @pytest_asyncio.fixture(scope="function")
 async def client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
-    """Test client with overridden get_db dependency."""
+    """Test client with overridden get_db dependency and valid authentication cookie."""
+    async def override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    token = auth_service.create_session_jwt("test_admin")
+    cookies = {settings.SESSION_COOKIE_NAME: token}
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test", cookies=cookies) as ac:
+        yield ac
+
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def unauthenticated_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
+    """Test client without session cookie to verify route protection (Directive 28)."""
     async def override_get_db():
         yield db_session
 

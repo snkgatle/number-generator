@@ -38,8 +38,16 @@ from app.schemas.stats import (
     LLMPromptContext,
     StatisticalAnalysisResponse,
 )
+from app.schemas.auth import (
+    OTPRequestResponse,
+    OTPVerifyRequest,
+    AuthStatusResponse,
+)
 
 __all__ = [
+    "OTPRequestResponse",
+    "OTPVerifyRequest",
+    "AuthStatusResponse",
     "GameType",
     "BoardStatus",
     "GAME_RULES",

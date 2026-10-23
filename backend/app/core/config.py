@@ -78,6 +78,44 @@ class Settings(BaseSettings):
         description="Optional Discord Webhook URL for channel notifications",
     )
 
+    # Authentication & Session Security (Phase 1.2 / Directives 25-28)
+    JWT_SECRET_KEY: str = Field(
+        default="lottomind-insecure-dev-secret-key-change-in-production-min32chars",
+        description="Secret key for signing stateless JWT session cookies",
+    )
+    JWT_ALGORITHM: str = Field(
+        default="HS256",
+        description="JWT signing algorithm",
+    )
+    JWT_EXPIRY_HOURS: int = Field(
+        default=24,
+        description="JWT token validity in hours (Directive 26: exactly 24 hours)",
+    )
+    OTP_EXPIRY_SECONDS: int = Field(
+        default=600,
+        description="OTP validity in seconds (Directive 25: 10 min expiry)",
+    )
+    SESSION_COOKIE_NAME: str = Field(
+        default="lottomind_session",
+        description="HttpOnly cookie key used to store the user session JWT",
+    )
+    SESSION_COOKIE_SECURE: Optional[bool] = Field(
+        default=None,
+        description="Enforces Secure flag on session cookie (auto-enabled in production)",
+    )
+
+    @property
+    def is_cookie_secure(self) -> bool:
+        """Determines if the session cookie must have Secure=True."""
+        if self.SESSION_COOKIE_SECURE is not None:
+            return self.SESSION_COOKIE_SECURE
+        return self.ENVIRONMENT.lower() == "production"
+
+    @property
+    def cookie_samesite(self) -> str:
+        """SameSite cookie policy: 'none' for cross-origin production HTTPS, 'lax' for local dev."""
+        return "none" if self.is_cookie_secure else "lax"
+
     # CORS
     CORS_ORIGINS: List[str] = [
         "http://localhost:3000",

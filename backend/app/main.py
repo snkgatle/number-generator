@@ -44,6 +44,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application shutdown complete.")
 
 
+from slowapi.errors import RateLimitExceeded
+from app.api.v1.auth import limiter
+
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
@@ -52,6 +55,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Directive 27: Attach slowapi state limiter for IP rate limiting
+app.state.limiter = limiter
 
 # CORS Middleware
 app.add_middleware(
@@ -62,6 +68,22 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Directive 27: Rate limit handler returning HTTP 429 with CORS support."""
+    headers = {}
+    origin = request.headers.get("origin")
+    if origin:
+        headers["Access-Control-Allow-Origin"] = origin
+        headers["Access-Control-Allow-Credentials"] = "true"
+        headers["Vary"] = "Origin"
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={"detail": f"Rate limit exceeded: {exc.detail}"},
+        headers=headers,
+    )
 
 
 @app.exception_handler(Exception)

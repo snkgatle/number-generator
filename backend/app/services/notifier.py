@@ -48,6 +48,16 @@ class Notifier:
             logger.error(f"Failed to deliver Telegram notification: {exc}")
             return False
 
+    async def send_telegram_otp(self, otp_code: str) -> bool:
+        """Directive 25: Sends a single-use 6-digit login OTP code to the authorized Telegram Chat."""
+        text = (
+            f"🔐 *LottoMind Login Verification*\n\n"
+            f"Your one-time login code is:\n\n"
+            f"👉 `{otp_code}` 👈\n\n"
+            f"⏱️ This code expires in 10 minutes. If you did not request this, please disregard."
+        )
+        return await self.send_telegram(text)
+
     async def send_discord(self, text: str) -> bool:
         """Sends a message payload to Discord Webhook URL."""
         if not self.discord_webhook:

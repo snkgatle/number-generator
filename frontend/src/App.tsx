@@ -3,6 +3,8 @@ import {
   fetchHealth,
   fetchCurrentBudget,
   fetchCircuitBreaker,
+  fetchAuthStatus,
+  logoutUser,
   HealthResponse,
   MonthlyBudget,
   CircuitBreakerStatus,
@@ -11,8 +13,9 @@ import { Overview } from './components/Overview';
 import { GenerationHub } from './components/GenerationHub';
 import { ResultsView } from './components/ResultsView';
 import { StatsExplorer } from './components/StatsExplorer';
+import { LoginView } from './components/LoginView';
 import { formatZAR } from './utils/format';
-import { LayoutGrid, Sparkles, Trophy, BarChart3, Menu, X, RotateCw } from 'lucide-react';
+import { LayoutGrid, Sparkles, Trophy, BarChart3, Menu, X, RotateCw, LogOut, ShieldCheck } from 'lucide-react';
 
 export type Tab = 'overview' | 'generate' | 'results' | 'stats';
 
@@ -24,6 +27,7 @@ const NAV: { id: Tab; label: string; icon: ElementType }[] = [
 ];
 
 export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [navOpen, setNavOpen] = useState(false);
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -31,11 +35,28 @@ export default function App() {
   const [circuitBreaker, setCircuitBreaker] = useState<CircuitBreakerStatus | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
+  const checkAuth = async () => {
+    try {
+      const status = await fetchAuthStatus();
+      setIsAuthenticated(status.authenticated);
+      if (status.authenticated) {
+        loadSystemState();
+      }
+    } catch {
+      setIsAuthenticated(false);
+    }
+  };
+
   const loadSystemState = async () => {
     setLoading(true);
     const [hData, bData, cbData] = await Promise.all([
       fetchHealth().catch(() => null),
-      fetchCurrentBudget().catch(() => null),
+      fetchCurrentBudget().catch((err) => {
+        if (err.message?.includes('401') || err.message?.includes('Authentication')) {
+          setIsAuthenticated(false);
+        }
+        return null;
+      }),
       fetchCircuitBreaker().catch(() => null),
     ]);
     setHealth(hData);
@@ -45,14 +66,45 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadSystemState();
+    checkAuth();
   }, []);
+
+  const handleLogout = async () => {
+    await logoutUser();
+    setIsAuthenticated(false);
+  };
 
   const navigate = (tab: Tab) => {
     setActiveTab(tab);
     setNavOpen(false);
     window.scrollTo({ top: 0 });
   };
+
+  // 1. Initial Authentication Check Loading State
+  if (isAuthenticated === null) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-surface-0">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 p-[2px] shadow-lg shadow-indigo-500/25 animate-spin">
+            <div className="h-full w-full rounded-[10px] bg-surface-0" />
+          </div>
+          <span className="text-xs font-mono text-zinc-500">Checking session credentials…</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated -> Show Login View with Telegram OTP (Directive 25)
+  if (!isAuthenticated) {
+    return (
+      <LoginView
+        onAuthenticated={() => {
+          setIsAuthenticated(true);
+          loadSystemState();
+        }}
+      />
+    );
+  }
 
   const totalBoards = budget?.total_boards ?? 20;
   const remainingBoards = budget?.remaining_boards ?? 0;
@@ -139,6 +191,23 @@ export default function App() {
               title="Refresh system status"
             >
               <RotateCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            </button>
+
+            {/* Authenticated Session Badge */}
+            <span className="badge badge-neutral hidden md:inline-flex items-center gap-1 text-emerald-400/90 border border-emerald-500/20 bg-emerald-500/10">
+              <ShieldCheck className="h-3 w-3 text-emerald-400" />
+              <span className="font-mono text-2xs">Admin</span>
+            </span>
+
+            {/* Logout Button */}
+            <button
+              id="btn-logout"
+              onClick={handleLogout}
+              className="btn btn-ghost btn-sm text-zinc-400 hover:text-rose-300 hover:bg-rose-500/10"
+              aria-label="Log out"
+              title="Sign out & clear 24h session"
+            >
+              <LogOut className="h-3.5 w-3.5" />
             </button>
 
             {/* Mobile Navigation Toggle */}

@@ -5,6 +5,81 @@
 const RAW_API_URL = import.meta.env.VITE_API_URL || '';
 const API_BASE_URL = RAW_API_URL ? `${RAW_API_URL.replace(/\/+$/, '')}/api/v1` : '/api/v1';
 
+let authToken: string | null = localStorage.getItem('lottomind_auth_token');
+
+export function setStoredToken(token: string | null) {
+  authToken = token;
+  if (token) {
+    localStorage.setItem('lottomind_auth_token', token);
+  } else {
+    localStorage.removeItem('lottomind_auth_token');
+  }
+}
+
+export function getStoredToken(): string | null {
+  return authToken;
+}
+
+export async function apiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers || {});
+  if (authToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${authToken}`);
+  }
+  return fetch(input, {
+    ...init,
+    headers,
+    credentials: 'include',
+  });
+}
+
+export interface AuthStatus {
+  authenticated: boolean;
+  expires_at?: string | null;
+  message?: string | null;
+}
+
+export async function requestTelegramOtp(): Promise<{ message: string; expires_in_seconds: number }> {
+  const res = await apiFetch(`${API_BASE_URL}/auth/request-otp`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to dispatch Telegram OTP');
+  }
+  return res.json();
+}
+
+export async function verifyTelegramOtp(otp_code: string): Promise<{ success: boolean; token: string }> {
+  const res = await apiFetch(`${API_BASE_URL}/auth/verify-otp`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ otp_code }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Invalid or expired OTP code');
+  }
+  const data = await res.json();
+  if (data.token) {
+    setStoredToken(data.token);
+  }
+  return data;
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await apiFetch(`${API_BASE_URL}/auth/logout`, { method: 'POST' });
+  } finally {
+    setStoredToken(null);
+  }
+}
+
+export async function fetchAuthStatus(): Promise<AuthStatus> {
+  const res = await apiFetch(`${API_BASE_URL}/auth/status`);
+  if (!res.ok) {
+    return { authenticated: false };
+  }
+  return res.json();
+}
+
 export interface HealthResponse {
   status: string;
   project: string;
@@ -57,7 +132,7 @@ export interface GeneratedBoard {
 }
 
 export async function fetchHealth(): Promise<HealthResponse> {
-  const response = await fetch(`${API_BASE_URL}/health`);
+  const response = await apiFetch(`${API_BASE_URL}/health`);
   if (!response.ok) {
     throw new Error(`Failed to check health: ${response.statusText}`);
   }
@@ -65,7 +140,7 @@ export async function fetchHealth(): Promise<HealthResponse> {
 }
 
 export async function fetchCurrentBudget(): Promise<MonthlyBudget> {
-  const response = await fetch(`${API_BASE_URL}/dashboard/budget/current`);
+  const response = await apiFetch(`${API_BASE_URL}/dashboard/budget/current`);
   if (!response.ok) {
     throw new Error(`Failed to fetch current budget: ${response.statusText}`);
   }
@@ -76,7 +151,7 @@ export async function fetchRecentDraws(limit = 10, gameType?: string): Promise<D
   const url = gameType
     ? `${API_BASE_URL}/scraper/draws?limit=${limit}&game_type=${gameType}`
     : `${API_BASE_URL}/scraper/draws?limit=${limit}`;
-  const response = await fetch(url);
+  const response = await apiFetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch draws: ${response.statusText}`);
   }
@@ -101,7 +176,7 @@ export interface ScrapeResponse {
 }
 
 export async function triggerScrape(limit = 50, gameTypes?: string[]): Promise<ScrapeResponse> {
-  const response = await fetch(`${API_BASE_URL}/scraper/scrape`, {
+  const response = await apiFetch(`${API_BASE_URL}/scraper/scrape`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ limit, game_types: gameTypes }),
@@ -139,7 +214,7 @@ export interface StatisticalAnalysis {
 }
 
 export async function fetchGameStatistics(gameType: string, sampleSize = 50): Promise<StatisticalAnalysis> {
-  const response = await fetch(`${API_BASE_URL}/stats/${gameType}?sample_size=${sampleSize}`);
+  const response = await apiFetch(`${API_BASE_URL}/stats/${gameType}?sample_size=${sampleSize}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch statistics for ${gameType}: ${response.statusText}`);
   }
@@ -160,7 +235,7 @@ export async function generateBoards(
   targetDrawDate?: string
 ): Promise<GeneratedBoard[]> {
   const isBundle = gameTypeOrBundle.includes('FAMILY');
-  const response = await fetch(`${API_BASE_URL}/generator/generate`, {
+  const response = await apiFetch(`${API_BASE_URL}/generator/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -243,7 +318,7 @@ export async function fetchGeneratedBoards(
   } else if (gameType) {
     url += `&game_type=${gameType}`;
   }
-  const response = await fetch(url);
+  const response = await apiFetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch boards: ${response.statusText}`);
   }
@@ -251,7 +326,7 @@ export async function fetchGeneratedBoards(
 }
 
 export async function fetchBoardById(boardId: number): Promise<BoardWithResult> {
-  const response = await fetch(`${API_BASE_URL}/generator/boards/${boardId}`);
+  const response = await apiFetch(`${API_BASE_URL}/generator/boards/${boardId}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch board details: ${response.statusText}`);
   }
@@ -259,7 +334,7 @@ export async function fetchBoardById(boardId: number): Promise<BoardWithResult> 
 }
 
 export async function fetchCircuitBreaker(): Promise<CircuitBreakerStatus> {
-  const response = await fetch(`${API_BASE_URL}/dashboard/circuit-breaker`);
+  const response = await apiFetch(`${API_BASE_URL}/dashboard/circuit-breaker`);
   if (!response.ok) {
     throw new Error(`Failed to check circuit breaker: ${response.statusText}`);
   }
@@ -270,7 +345,7 @@ export async function fetchAllocationPlan(yearMonth?: string): Promise<Allocatio
   const url = yearMonth
     ? `${API_BASE_URL}/dashboard/allocation-plan?year_month=${yearMonth}`
     : `${API_BASE_URL}/dashboard/allocation-plan`;
-  const response = await fetch(url);
+  const response = await apiFetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch allocation plan: ${response.statusText}`);
   }
@@ -278,7 +353,7 @@ export async function fetchAllocationPlan(yearMonth?: string): Promise<Allocatio
 }
 
 export async function triggerPreDrawPipeline(gameTypes?: string[], targetDate?: string): Promise<any> {
-  const response = await fetch(`${API_BASE_URL}/generator/pipeline/pre-draw`, {
+  const response = await apiFetch(`${API_BASE_URL}/generator/pipeline/pre-draw`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ game_types: gameTypes, target_date: targetDate }),
@@ -291,7 +366,7 @@ export async function triggerPreDrawPipeline(gameTypes?: string[], targetDate?: 
 }
 
 export async function fetchPostDrawFeedback(drawId: number): Promise<PostDrawFeedback> {
-  const response = await fetch(`${API_BASE_URL}/generator/feedback/${drawId}`, {
+  const response = await apiFetch(`${API_BASE_URL}/generator/feedback/${drawId}`, {
     method: 'POST',
   });
   if (!response.ok) {
@@ -302,7 +377,7 @@ export async function fetchPostDrawFeedback(drawId: number): Promise<PostDrawFee
 }
 
 export async function triggerPostDrawPipeline(): Promise<any> {
-  const response = await fetch(`${API_BASE_URL}/generator/pipeline/post-draw`, {
+  const response = await apiFetch(`${API_BASE_URL}/generator/pipeline/post-draw`, {
     method: 'POST',
   });
   if (!response.ok) {

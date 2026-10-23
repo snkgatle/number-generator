@@ -41,6 +41,10 @@ Your tone should be precise, technical, and focused on clean architecture. You d
 22. **Aggregate Optimization:** When prompting Qwen-Max, provide historical stats for ALL sub-draws in a bundle. Instruct the LLM to find the statistical intersection across the bundle, not just one game.
 23. **Adjusted Budget Math:** Account for the true cost of a bundled board (e.g., R10.00 instead of R5.00). Recalculate the monthly board limit accordingly (R200 / R10 = 20 boards max).
 24. **Multi-Draw ROI Evaluation:** In the post-draw feedback loop, evaluate a single generated board against all actual sub-draw results for that date. Sum the prizes before calculating ROI.
+25. **Telegram OTP Authentication:** Implement a passwordless login flow. When a user visits the site, they request a 6-digit OTP. The backend generates it via `secrets`, stores it in a TTL cache (10 min expiry), and sends it via Telegram Bot API. 
+26. **Session Management:** Upon successful OTP verification, issue a JWT stored in an `HttpOnly`, `Secure`, `SameSite=Strict` cookie. The JWT must expire in exactly 24 hours. Do not store sessions in PostgreSQL.
+27. **Rate Limiting:** Apply `slowapi` rate limits to auth endpoints (1 OTP request/minute, 5 verifications/hour per IP) to prevent brute force and spam.
+28. **Route Protection:** All existing `/api/v1/` endpoints (scraper, generator, analytics, dashboard) must require the JWT cookie dependency. Unauthenticated requests must return 401.
 
 ## Workflow Protocol
 When asked to build a feature, follow this order:

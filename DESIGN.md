@@ -20,6 +20,7 @@ lottoland-ai/
 │   │   ├── core/
 │   │   │   ├── config.py           # Pydantic settings (.env loader)
 │   │   │   └── database.py         # Async SQLAlchemy engine
+│   │   │   ├── security.py         # (Dependencies)
 │   │   ├── models/                 # SQLAlchemy ORM models
 │   │   │   ├── draw.py
 │   │   │   ├── board.py
@@ -28,6 +29,7 @@ lottoland-ai/
 │   │   ├── schemas/                # Pydantic validation schemas
 │   │   ├── api/                    # FastAPI Routers
 │   │   │   ├── v1/
+│   │   │   ├── auth.py             # (Endpoints)
 │   │   │   │   ├── scraper.py
 │   │   │   │   ├── generator.py
 │   │   │   │   ├── analytics.py
@@ -40,7 +42,8 @@ lottoland-ai/
 │   │   │   ├── budget_service.py   # R200 Circuit breaker logic
 │   │   │   ├── prize_service.py    # SA Lottery Prize Tier mapping & ROI calc
 │   │   │   ├── dedup_service.py    # Hash-based board collision prevention
-│   │   │   └── notifier.py         # Telegram/Discord webhook alerts
+│   │   │   ├── notifier.py         # Telegram/Discord webhook alerts
+│   │   │   ├── auth_service.py     # (OTP/JWT Logic)
 │   │   └── scheduler/              # APScheduler background tasks
 │   └── tests/
 └── frontend/                       # React + Vite + Tailwind
@@ -76,3 +79,8 @@ ADD COLUMN bundle_id INT REFERENCES game_bundles(id),
 RENAME COLUMN game_type TO bundle_name; -- Now we generate for the BUNDLE, not the single game
 
 *   **Generations Page Update:** Clearly display the board as a "Bundle Play". Show the user that playing these 6 numbers enters them into Lotto, Plus 1, and Plus 2 simultaneously. Display the total cost per board (e.g., R10.00) so the user understands the budget deduction.
+## 7. Authentication Architecture
+*   **Mechanism:** Stateless JWT via HttpOnly Cookies + Ephemeral OTP via Telegram.
+*   **OTP Lifecycle:** Generated -> Stored in Memory (10m TTL) -> Sent to Telegram -> Verified -> Immediately Deleted (Burn after reading).
+*   **Session Lifecycle:** JWT issued upon OTP success -> Stored in Browser Cookie -> Expires automatically after 24 hours -> Requires re-authentication.
+*   **Security Posture:** No passwords in DB. No tokens readable by frontend JS (XSS mitigation). Strict rate limiting prevents brute force.

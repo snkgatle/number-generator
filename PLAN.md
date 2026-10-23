@@ -9,6 +9,17 @@ Execute these phases sequentially. Do not move to the next phase until the curre
 - [x] Implement Alembic for database migrations.
 - [x] Create Pydantic schemas for all models.
 
+## Phase 1.2: Authentication & Security Layer
+- [x] Add `python-jose`, `cachetools`, `slowapi`, and `httpx` to requirements.txt.
+- [x] Update `.env.example` with JWT and Telegram credentials.
+- [x] Create `auth_service.py` implementing OTP generation (TTLCache), verification, and JWT creation (24h expiry).
+- [x] Update `notifier.py` to include the `send_telegram_otp()` function.
+- [x] Create `api/v1/auth.py` with `/request-otp`, `/verify-otp`, and `/logout` endpoints.
+- [x] Implement `slowapi` rate limiting on auth endpoints.
+- [x] Create `core/security.py` FastAPI dependency to validate JWT cookies.
+- [x] Inject the security dependency into all existing protected routers.
+- [x] Build the React Login View (OTP request button + 6-digit input) and `<ProtectedRoute>` wrapper.
+
 ## Phase 1.5: Game Bundle Architecture
 - [x] Create `game_bundles` table and map all draws to their respective bundles.
 - [x] Refactor `budget_service.py` to calculate board limits based on bundle cost (R10/board = 20 boards/month).

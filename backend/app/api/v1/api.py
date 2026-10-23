@@ -1,10 +1,13 @@
-"""Aggregate v1 API router."""
-from fastapi import APIRouter
-from app.api.v1 import scraper, generator, dashboard, stats, analytics
+from fastapi import APIRouter, Depends
+from app.api.v1 import scraper, generator, dashboard, stats, analytics, auth
 from app.core.config import settings
 from app.core.database import check_db_connection
+from app.core.security import require_authenticated_user
 
 api_router = APIRouter()
+
+# Public Endpoints (Health & Passwordless OTP Auth)
+api_router.include_router(auth.router)
 
 
 @api_router.get("/health", tags=["Health"])
@@ -20,8 +23,9 @@ async def health_check():
     }
 
 
-api_router.include_router(scraper.router)
-api_router.include_router(generator.router)
-api_router.include_router(dashboard.router)
-api_router.include_router(stats.router)
-api_router.include_router(analytics.router)
+# Protected Routers (Directive 28: Enforce 24h JWT session verification returning HTTP 401)
+api_router.include_router(scraper.router, dependencies=[Depends(require_authenticated_user)])
+api_router.include_router(generator.router, dependencies=[Depends(require_authenticated_user)])
+api_router.include_router(dashboard.router, dependencies=[Depends(require_authenticated_user)])
+api_router.include_router(stats.router, dependencies=[Depends(require_authenticated_user)])
+api_router.include_router(analytics.router, dependencies=[Depends(require_authenticated_user)])

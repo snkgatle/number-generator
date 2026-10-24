@@ -103,6 +103,15 @@ class Settings(BaseSettings):
         default=None,
         description="Enforces Secure flag on session cookie (auto-enabled in production)",
     )
+    SCHEDULER_SECRET: Optional[str] = Field(
+        default=None,
+        description="Shared secret for authenticating Google Cloud Scheduler HTTP triggers (Directive 28)",
+    )
+
+    @property
+    def effective_scheduler_secret(self) -> str:
+        """Returns SCHEDULER_SECRET if set, falling back to JWT_SECRET_KEY."""
+        return self.SCHEDULER_SECRET or self.JWT_SECRET_KEY
 
     @property
     def is_cookie_secure(self) -> bool:

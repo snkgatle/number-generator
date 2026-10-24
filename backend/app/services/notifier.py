@@ -135,3 +135,49 @@ class Notifier:
             f"- Net Draw ROI: *{roi_percentage:+.2f}%*"
         )
         await self.broadcast(title, msg)
+
+    async def notify_draw_completion(
+        self,
+        game_type: str,
+        draw_number: int,
+        draw_date: str,
+        winning_numbers: List[int],
+        bonus_or_pb: Optional[int],
+        board_evaluations: List[Dict[str, Any]],
+        total_winnings: Decimal,
+        total_cost: Decimal,
+        roi_percentage: float,
+    ) -> None:
+        """Dispatches a rich post-draw report with official winning numbers and user board performances."""
+        special_label = "PowerBall" if "POWERBALL" in game_type.upper() else "Bonus"
+        special_str = f" | {special_label}: `{bonus_or_pb}`" if bonus_or_pb is not None else ""
+        nums_str = ", ".join(str(n) for n in sorted(winning_numbers))
+
+        lines = [
+            f"🎰 *{game_type} Draw #{draw_number} Results ({draw_date})*",
+            f"Winning Numbers: `[{nums_str}]`{special_str}\n",
+        ]
+
+        if board_evaluations:
+            lines.append("🎯 *Your Generated Boards:*")
+            for b in board_evaluations:
+                b_id = b.get("board_id")
+                b_nums = ", ".join(str(n) for n in sorted(b.get("numbers", [])))
+                b_spec = b.get("bonus_or_pb")
+                spec_part = f" + PB `{b_spec}`" if b_spec is not None else ""
+                matched = b.get("matched_count", 0)
+                prize = b.get("prize", Decimal("0.00"))
+                division = b.get("division", "No Prize")
+                prize_str = f" -> 🏆 *R{prize:,.2f}* ({division})" if prize > 0 else f" ({division})"
+                lines.append(f"• Board #{b_id}: `[{b_nums}]`{spec_part} — {matched} matches{prize_str}")
+
+            lines.append("")
+            lines.append("📊 *Financial Summary:*")
+            lines.append(f"• Cost: `R{total_cost:,.2f}` | Payout: *R{total_winnings:,.2f}*")
+            lines.append(f"• Net ROI: *{roi_percentage:+.2f}%*")
+        else:
+            lines.append("ℹ️ _No user boards were played for this draw._")
+
+        msg = "\n".join(lines)
+        title = f"{game_type} Draw #{draw_number} Results"
+        await self.broadcast(title, msg)

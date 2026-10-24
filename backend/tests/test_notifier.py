@@ -73,3 +73,24 @@ async def test_unconfigured_notifier_fallback(unconfigured_notifier):
         total_winnings=Decimal("85000.00"),
         roi_percentage=339900.0,
     )
+
+    await unconfigured_notifier.notify_draw_completion(
+        game_type="POWERBALL",
+        draw_number=1766,
+        draw_date="2026-10-23",
+        winning_numbers=[1, 14, 22, 35, 41],
+        bonus_or_pb=12,
+        board_evaluations=[
+            {
+                "board_id": 10,
+                "numbers": [16, 21, 33, 40, 48],
+                "bonus_or_pb": 12,
+                "matched_count": 0,
+                "division": "Division 9",
+                "prize": Decimal("15.00"),
+            }
+        ],
+        total_winnings=Decimal("15.00"),
+        total_cost=Decimal("10.00"),
+        roi_percentage=50.0,
+    )

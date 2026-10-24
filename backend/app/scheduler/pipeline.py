@@ -6,7 +6,7 @@ Adheres strictly to:
 - Directive 5: Separation of Concerns (scraper, stats, ai, budget).
 - Directive 6: Tenacity retries and graceful fallback.
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from loguru import logger
@@ -331,12 +331,10 @@ class PipelineOrchestrator:
                 db.add(result_entity)
                 total_evaluated += 1
                 evaluated_draw_ids.add(draw.id)
-            total_evaluated += 1
-            evaluated_draw_ids.add(draw.id)
 
         await db.commit()
 
-        # 3. Broadcast notifications & Trigger Post-Draw AI Feedback Loop for evaluated draws
+        # 3. Broadcast notifications & Trigger Post-Draw AI Feedback Loop
         feedback_summaries = {}
         if evaluated_draw_ids:
             for draw_id in evaluated_draw_ids:
@@ -344,23 +342,52 @@ class PipelineOrchestrator:
                 if not draw:
                     continue
 
-                b_res = await db.execute(
-                    select(GeneratedBoard).where(GeneratedBoard.draw_id == draw_id)
-                )
-                boards = list(b_res.scalars().all())
-
                 r_res = await db.execute(
                     select(BoardResult).where(BoardResult.draw_id == draw_id)
                 )
                 results = list(r_res.scalars().all())
 
-                # Calculate Macro Financial ROI across evaluated draw
+                board_evaluations: List[Dict[str, Any]] = []
+                seen_board_ids = set()
                 total_winnings = sum((r.prize_amount for r in results), Decimal("0.00"))
-                total_cost = sum((b.cost for b in boards), Decimal("0.00"))
+                total_cost = Decimal("0.00")
+                boards_for_ai: List[GeneratedBoard] = []
+
+                for r in results:
+                    b = await db.get(GeneratedBoard, r.board_id)
+                    if b:
+                        if b.id not in seen_board_ids:
+                            seen_board_ids.add(b.id)
+                            total_cost += b.cost or Decimal("10.00")
+                            boards_for_ai.append(b)
+                        board_evaluations.append({
+                            "board_id": b.id,
+                            "numbers": b.numbers,
+                            "bonus_or_pb": b.bonus_or_powerball,
+                            "matched_count": r.matched_count,
+                            "matched_numbers": r.matched_numbers,
+                            "division": r.division,
+                            "prize": r.prize_amount,
+                        })
+
                 net_profit = total_winnings - total_cost
                 roi_pct = float((net_profit / total_cost) * 100) if total_cost > 0 else 0.0
+                special_ball = draw.powerball if "POWERBALL" in draw.game_type.upper() else draw.bonus_ball
 
-                # Directive alerts: High matches & Draw ROI Summary
+                # Send rich post-draw Telegram report with winning numbers & user boards
+                await self.notifier.notify_draw_completion(
+                    game_type=draw.game_type,
+                    draw_number=draw.draw_number,
+                    draw_date=draw.draw_date.isoformat(),
+                    winning_numbers=draw.numbers,
+                    bonus_or_pb=special_ball,
+                    board_evaluations=board_evaluations,
+                    total_winnings=total_winnings,
+                    total_cost=total_cost,
+                    roi_percentage=roi_pct,
+                )
+
+                # High matches alert if any board won a prize
                 winning_results = [r for r in results if r.prize_amount > Decimal("0.00")]
                 if winning_results:
                     win_payload = [
@@ -379,23 +406,41 @@ class PipelineOrchestrator:
                         total_prize=total_winnings,
                     )
 
-                await self.notifier.notify_draw_summary(
-                    game_type=draw.game_type,
-                    draw_date=draw.draw_date.isoformat(),
-                    total_boards=len(boards),
-                    total_winnings=total_winnings,
-                    roi_percentage=roi_pct,
-                )
-
-                if boards:
+                if boards_for_ai:
                     try:
-                        fb = await self.ai_service.analyze_draw_performance(draw, boards, results)
+                        fb = await self.ai_service.analyze_draw_performance(draw, boards_for_ai, results)
                         feedback_summaries[f"draw_{draw_id}"] = {
                             "accuracy": fb.accuracy_rate,
                             "recommendations": fb.calibration_recommendations,
                         }
                     except Exception as fb_err:
                         logger.error(f"Feedback loop error for draw #{draw_id}: {fb_err}")
+
+        else:
+            # Fallback: If no user boards were pending for this cycle, broadcast newly scraped draw results
+            today = date.today()
+            recent_draws_res = await db.execute(
+                select(Draw)
+                .where(Draw.draw_date >= today - timedelta(days=2))
+                .order_by(Draw.draw_date.desc(), Draw.id.desc())
+            )
+            recent_draws = list(recent_draws_res.scalars().all())
+            notified_games = set()
+            for draw in recent_draws:
+                if draw.game_type not in notified_games:
+                    notified_games.add(draw.game_type)
+                    special_ball = draw.powerball if "POWERBALL" in draw.game_type.upper() else draw.bonus_ball
+                    await self.notifier.notify_draw_completion(
+                        game_type=draw.game_type,
+                        draw_number=draw.draw_number,
+                        draw_date=draw.draw_date.isoformat(),
+                        winning_numbers=draw.numbers,
+                        bonus_or_pb=special_ball,
+                        board_evaluations=[],
+                        total_winnings=Decimal("0.00"),
+                        total_cost=Decimal("0.00"),
+                        roi_percentage=0.0,
+                    )
 
         logger.info(
             f"Post-Draw Pipeline complete: {total_evaluated} boards evaluated across {len(evaluated_draw_ids)} draws."

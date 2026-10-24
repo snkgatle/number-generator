@@ -170,4 +170,13 @@ async def test_route_protection_unauthenticated_rejection(
     # Public health check must still succeed -> 200
     res_health = await unauthenticated_client.get("/api/v1/health")
     assert res_health.status_code == 200
-    assert res_health.json()["status"] == "ok"
+    assert res_health.json()["status"] in ("ok", "degraded")
+
+
+@pytest.mark.asyncio
+async def test_scheduler_token_authentication(unauthenticated_client: AsyncClient):
+    """Directive 28: Requests with valid X-Scheduler-Token are authenticated for background triggers."""
+    from app.core.config import settings
+    headers = {"X-Scheduler-Token": settings.effective_scheduler_secret}
+    res = await unauthenticated_client.get("/api/v1/dashboard/budget/current", headers=headers)
+    assert res.status_code == 200

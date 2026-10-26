@@ -1,5 +1,82 @@
 import React, { useState } from 'react';
-import { AlertCircle, CheckCircle2, Check, Copy, Info } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Check, Copy, Info, ChevronDown } from 'lucide-react';
+
+/* ─── Tier reference popover (Directive 14) ──────────────────────── */
+
+export interface PrizeTierRow {
+  division: string;
+  match_main: number;
+  match_bonus: boolean;
+  payout: number;
+}
+
+interface TooltipProps {
+  tiers: PrizeTierRow[];
+  selectedDivision?: string;
+  gameType: string;
+}
+
+export const TierReference: React.FC<TooltipProps> = ({ tiers, selectedDivision, gameType }) => {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        className="inline-flex items-center gap-0.5 text-xs font-mono cursor-help text-zinc-400 hover:text-accent transition-colors"
+        aria-label="Show prize tier reference"
+      >
+        <span className="text-2xs">{selectedDivision ?? 'Tiers'}</span>
+        <ChevronDown className={`h-2.5 w-2.5 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <>
+          {/* Overlay to close on click outside */}
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
+          <div className="absolute left-0 top-full z-50 mt-1 min-w-[280px] rounded-md border border-line bg-surface-1 p-2 shadow-xl animate-slide-in-right pointer-events-auto">
+            <div className="mb-1 flex items-center justify-between text-2xs uppercase tracking-wider text-zinc-500">
+              <span>Prize tiers · {gameType}</span>
+              <button onClick={() => setOpen(false)} className="hover:text-zinc-300" title="Close">×</button>
+            </div>
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="text-zinc-500">
+                  <th className="text-left py-1 pr-2">Division</th>
+                  <th className="text-left py-1 px-1">Match</th>
+                  <th className="text-right py-1 pl-2">Payout</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tiers.map((t, i) => (
+                  <tr
+                    key={i}
+                    className={`${
+                      t.division === selectedDivision
+                        ? 'bg-indigo-500/10 text-accent'
+                        : 'text-zinc-300'
+                    }`}
+                  >
+                    <td className="py-0.5 pr-2 whitespace-nowrap truncate max-w-[120px]">{t.division}</td>
+                    <td className="px-1 whitespace-nowrap text-zinc-400">
+                      {t.match_main} main{t.match_bonus ? ' + bonus/PB' : ''}
+                    </td>
+                    <td className="text-right pl-2 tabular-nums text-emerald-300">
+                      R{t.payout.toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
 
 /* -------------------------------------------------------------------------- */
 /* Page header                                                                 */

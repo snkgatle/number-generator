@@ -9,7 +9,7 @@ import {
   NumberFrequency,
 } from '../services/api';
 import { PageHeader, Alert, Segmented } from './ui';
-import { GAMES, formatDate, gameLabel, isPowerBallGame } from '../utils/format';
+import { GAMES, formatDate, gameLabel, isPowerBallGame, BUNDLES, bundleLabel } from '../utils/format';
 import {
   RotateCw,
   Flame,
@@ -19,6 +19,7 @@ import {
   PieChart as PieIcon,
   TrendingUp,
   Grid,
+  Layers,
 } from 'lucide-react';
 import {
   BarChart,
@@ -40,6 +41,7 @@ const PARITY_COLORS = ['#8b5cf6', '#06b6d4', '#10b981', '#f59e0b', '#ec4899', '#
 
 export const StatsExplorer: React.FC = () => {
   const [selectedGame, setSelectedGame] = useState<string>('LOTTO');
+  const [selectedBundle, setSelectedBundle] = useState<string>('LOTTO_FAMILY');
   const sampleSize = 50;
   const [stats, setStats] = useState<StatisticalAnalysis | null>(null);
   const [draws, setDraws] = useState<Draw[]>([]);
@@ -50,13 +52,27 @@ export const StatsExplorer: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'charts' | 'matrix' | 'draws'>('charts');
   const [inspectedNumber, setInspectedNumber] = useState<number | null>(null);
 
+  // Resolve which game name to show — maps bundle selections to their representative API endpoint
+  const getApiGameForBundle = (bundleId: string): string => {
+    if (bundleId === 'LOTTO_FAMILY') return 'LOTTO';
+    return 'POWERBALL';
+  };
+
+  const viewName = (() => {
+    if (selectedGame === 'LOTTO_FAMILY' || selectedGame === 'POWERBALL_FAMILY') {
+      return { displayName: bundleLabel(selectedGame), apiKey: getApiGameForBundle(selectedGame) };
+    }
+    return { displayName: gameLabel(selectedGame), apiKey: selectedGame };
+  })();
+
   const loadStatsAndDraws = async () => {
     setLoading(true);
     setError(null);
     try {
+      const game = viewName.apiKey;
       const [sData, dData] = await Promise.all([
-        fetchGameStatistics(selectedGame, sampleSize),
-        fetchRecentDraws(20, selectedGame),
+        fetchGameStatistics(game, sampleSize),
+        fetchRecentDraws(20, game),
       ]);
       setStats(sData);
       setDraws(dData);
@@ -69,13 +85,14 @@ export const StatsExplorer: React.FC = () => {
 
   useEffect(() => {
     loadStatsAndDraws();
-  }, [selectedGame]);
+  }, [selectedGame, selectedBundle]);
 
   const handleScrape = async () => {
     setScraping(true);
     setScrapeSuccess(null);
     try {
-      const res = await triggerScrape(50, [selectedGame]);
+      const game = viewName.apiKey;
+      const res = await triggerScrape(50, [game]);
       setScrapeSuccess(res.message);
       await loadStatsAndDraws();
     } catch (err: any) {
@@ -90,6 +107,17 @@ export const StatsExplorer: React.FC = () => {
     label: g.label,
   }));
 
+  const bundleOptions = BUNDLES.map((b) => ({
+    value: b.id,
+    label: (
+      <span className="flex items-center gap-1.5 py-0.5">
+        <Layers className="h-3 w-3 text-accent" />
+        <span>{bundleLabel(b.id)}</span>
+      </span>
+    ),
+  }));
+
+  // When a bundle is selected, use its representative sub-game for API calls
   // Frequency Bar Chart Data (Top 10 Hot vs Top 5 Cold)
   const frequencyChartData = stats
     ? [
@@ -164,14 +192,25 @@ export const StatsExplorer: React.FC = () => {
         }
       />
 
-      {/* Game Selector Toolbar */}
+      {/* Game / Bundle Selector Toolbar */}
       <div className="card card-body flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-surface-2 via-surface-2 to-surface-3/30">
-        <Segmented
-          options={gameOptions}
-          value={selectedGame}
-          onChange={(v) => setSelectedGame(v)}
-          ariaLabel="Select lottery game"
-        />
+        <div className="flex flex-col sm:flex-row gap-3">
+          <Segmented
+            options={gameOptions}
+            value={selectedGame}
+            onChange={(v) => setSelectedGame(v)}
+            ariaLabel="Select lottery game"
+          />
+          <Segmented
+            options={bundleOptions}
+            value={selectedBundle}
+            onChange={(v) => {
+              setSelectedGame(v);
+              setSelectedBundle(v);
+            }}
+            ariaLabel="Select game bundle"
+          />
+        </div>
 
         <div className="flex items-center gap-3">
           {stats && (

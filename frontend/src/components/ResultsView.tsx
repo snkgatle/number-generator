@@ -6,11 +6,13 @@ import {
   fetchPostDrawFeedback,
   triggerPostDrawPipeline,
   markBoardPlayed,
+  fetchPrizeTiers,
   BoardWithResult,
   Draw,
   PostDrawFeedback,
 } from '../services/api';
-import { PageHeader, StatCard, Alert, EmptyState, Segmented, CopyButton } from './ui';
+import { PageHeader, StatCard, Alert, EmptyState, Segmented, CopyButton, TierReference } from './ui';
+import type { PrizeTierRow } from '../components/ui';
 import {
   GAMES,
   formatDate,
@@ -59,6 +61,24 @@ export const DrawCountdownBadge: React.FC<{ targetDate: string }> = ({ targetDat
   );
 };
 
+/** Small key explaining ball highlight styles — matched, bonus, powerball, standard ranges. */
+export const MatchLegend: React.FC = () => (
+  <div className="flex flex-wrap items-center gap-3 text-2xs text-zinc-500 font-mono px-1 pt-1">
+    <span className="flex items-center gap-1">
+      <span className="inline-block h-4 w-4 rounded-full bg-gradient-to-br from-emerald-300 via-emerald-400 to-teal-600 ring-1 ring-inset" />
+      <span>Matched</span>
+    </span>
+    <span className="flex items-center gap-1">
+      <span className="inline-block h-4 w-4 rounded-full bg-gradient-to-br from-amber-200 via-amber-400 to-yellow-600 ring-1 ring-inset" />
+      <span>Bonus ball</span>
+    </span>
+    <span className="flex items-center gap-1">
+      <span className="inline-block h-4 w-4 rounded-full bg-gradient-to-br from-red-400 via-rose-600 to-red-800 ring-1 ring-inset" />
+      <span>PowerBall</span>
+    </span>
+  </div>
+);
+
 export const ResultsView: React.FC = () => {
   const [boards, setBoards] = useState<BoardWithResult[]>([]);
   const [draws, setDraws] = useState<Draw[]>([]);
@@ -69,6 +89,24 @@ export const ResultsView: React.FC = () => {
   const [feedbackLoading, setFeedbackLoading] = useState<number | null>(null);
   const [feedbackData, setFeedbackData] = useState<PostDrawFeedback | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tierCache, setTierCache] = useState<Record<string, PrizeTierRow[]>>({});
+
+  // Cache prize tiers once per game type
+  useEffect(() => {
+    if (Object.keys(tierCache).length > 0 || loading) return;
+    const games = [...new Set(boards.map((b) => b.game_type))];
+    const loadAll = async () => {
+      const results: Record<string, PrizeTierRow[]> = {};
+      for (const g of games) {
+        try {
+          const data = await fetchPrizeTiers(g);
+          results[g] = data.tiers;
+        } catch { /* non-critical */ }
+      }
+      setTierCache(results);
+    };
+    void loadAll();
+  }, [loading]);
 
   const loadData = async () => {
     setLoading(true);
@@ -626,6 +664,14 @@ export const ResultsView: React.FC = () => {
                         · Matched {board.result.matched_count} main ball{board.result.matched_count === 1 ? '' : 's'}
                         {board.result.matched_bonus ? ` + ${isPowerBall ? 'PowerBall' : 'Bonus'}` : ''}
                       </span>
+                      {/* Prize tier reference — shows all possible tiers on hover */}
+                      {tierCache[board.game_type] && board.result?.division && (
+                        <TierReference
+                          tiers={tierCache[board.game_type]}
+                          selectedDivision={board.result.division}
+                          gameType={board.game_type}
+                        />
+                      )}
                     </div>
 
                     <div className="flex items-center gap-3">
@@ -662,12 +708,15 @@ export const ResultsView: React.FC = () => {
                       {matchingDraw ? `· Draw #${matchingDraw.draw_number} (${formatDate(matchingDraw.draw_date)})` : ''}
                     </span>
                     {matchingDraw ? (
-                      <BallRow
-                        numbers={matchingDraw.numbers}
-                        extra={matchingDraw.powerball || matchingDraw.bonus_ball}
-                        powerBall={Boolean(matchingDraw.powerball)}
-                        size="md"
-                      />
+                      <>
+                        <BallRow
+                          numbers={matchingDraw.numbers}
+                          extra={matchingDraw.powerball || matchingDraw.bonus_ball}
+                          powerBall={Boolean(matchingDraw.powerball)}
+                          size="md"
+                        />
+                        <MatchLegend />
+                      </>
                     ) : (
                       <div className="text-xs text-zinc-500 italic py-1.5">
                         Awaiting official lottery draw results for {formatDate(board.target_draw_date)}

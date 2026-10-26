@@ -401,3 +401,26 @@ export async function triggerPostDrawPipeline(): Promise<any> {
   return response.json();
 }
 
+/* ─── Prize tier reference (Directive 14) ───────────────────────── */
+
+export interface PrizeTier {
+  division: string;
+  match_main: number;
+  match_bonus: boolean;
+  payout: number;
+}
+
+export interface PrizeMatrix {
+  game_type: string;
+  matrix: Record<string, unknown>;
+  tiers: PrizeTier[];
+}
+
+export async function fetchPrizeTiers(gameType: string): Promise<PrizeMatrix> {
+  const response = await apiFetch(`${API_BASE_URL}/prizes/tiers/${encodeURIComponent(gameType)}`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch prize tiers: ${response.statusText}`);
+  }
+  return response.json();
+}
+

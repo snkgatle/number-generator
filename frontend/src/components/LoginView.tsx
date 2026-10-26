@@ -1,20 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { requestTelegramOtp, verifyTelegramOtp } from '../services/api';
-import { Sparkles, Send, ShieldCheck, AlertCircle, KeyRound, CheckCircle2 } from 'lucide-react';
+import { Sparkles, Send, ShieldCheck, AlertCircle, KeyRound, CheckCircle2, Clock } from 'lucide-react';
 
 interface LoginViewProps {
   onAuthenticated: () => void;
 }
+
+const OTP_COOLDOWN_SECONDS = 60;
 
 export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
   const [step, setStep] = useState<'request' | 'verify'>('request');
   const [otpCode, setOtpCode] = useState<string>('');
   const [requesting, setRequesting] = useState<boolean>(false);
   const [verifying, setVerifying] = useState<boolean>(false);
+  const [cooldownLeft, setCooldownLeft] = useState<number>(0);
   const [error, setError] = useState<string | null>(null);
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
 
+  // Cooldown timer when rate limited
+  useEffect(() => {
+    if (cooldownLeft <= 0) return;
+    const timer = window.setInterval(() => {
+      setCooldownLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [cooldownLeft]);
+
   const handleRequestOtp = async () => {
+    if (cooldownLeft > 0) return;
     setRequesting(true);
     setError(null);
     setInfoMessage(null);
@@ -23,7 +42,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
       setInfoMessage(res.message || 'OTP dispatched to Telegram.');
       setStep('verify');
     } catch (err: any) {
-      setError(err.message || 'Failed to request OTP. Please try again.');
+      if (err.message?.includes('Rate limit') || err.message?.includes('429')) {
+        setCooldownLeft(OTP_COOLDOWN_SECONDS);
+        setError(`Rate limited — please wait ${OTP_COOLDOWN_SECONDS}s before requesting again.`);
+      } else {
+        setError(err.message || 'Failed to request OTP. Please try again.');
+      }
     } finally {
       setRequesting(false);
     }
@@ -170,10 +194,17 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
                 <button
                   type="button"
                   onClick={handleRequestOtp}
-                  disabled={requesting}
-                  className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                  disabled={requesting || cooldownLeft > 0}
+                  className={`flex items-center gap-1 ${cooldownLeft > 0 ? 'text-zinc-500 cursor-wait' : 'text-indigo-400 hover:text-indigo-300'} transition-colors`}
                 >
-                  Resend code
+                  {cooldownLeft > 0 ? (
+                    <>
+                      <Clock className="h-3 w-3" />
+                      <span>Resend in {cooldownLeft}s</span>
+                    </>
+                  ) : (
+                    'Resend code'
+                  )}
                 </button>
                 <button
                   type="button"
@@ -192,6 +223,10 @@ export const LoginView: React.FC<LoginViewProps> = ({ onAuthenticated }) => {
 
           {/* Security Notice */}
           <div className="pt-4 border-t border-line text-center text-[11px] text-zinc-600">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <ShieldCheck className="h-3 w-3 text-zinc-500" />
+              <span>Rate limited: 1 request/min · 5 verifications/hour per IP</span>
+            </div>
             Protected by HttpOnly 24-hour stateless session tokens & rate-limited OTP barriers.
           </div>
         </div>

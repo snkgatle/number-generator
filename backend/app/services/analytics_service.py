@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.analytics import TemporalAnalytics
 from app.models.draw import Draw
 from app.schemas.analytics import TemporalMetrics, TemporalPatternReviewResponse
-from app.schemas.enums import BundleType, GameType
+from app.schemas.enums import BUNDLE_GAMES, BundleType, GameType
 from app.services.ai_service import AIService
 
 
@@ -241,12 +241,25 @@ class TemporalAnalyticsService:
     async def get_latest_actionable_bias(
         self, db: AsyncSession, game_type: Union[GameType, BundleType, str]
     ) -> Optional[Dict[str, Any]]:
-        """Retrieves the latest actionable bias for generation injection."""
+        """Retrieves the latest actionable bias for generation injection.
+
+        Directive 21: When queried with a bundle key, searches across all
+        member sub-games and returns the most recent bias from any of them.
+        """
         raw_val = game_type.value if hasattr(game_type, "value") else str(game_type)
+
+        if raw_val in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            member_games = [
+                g.value for g in BUNDLE_GAMES.get(BundleType(raw_val), [])
+            ]
+            condition = TemporalAnalytics.game_type.in_(member_games)
+        else:
+            condition = TemporalAnalytics.game_type == raw_val
+
         query = (
             select(TemporalAnalytics)
             .where(
-                TemporalAnalytics.game_type == raw_val,
+                condition,
                 TemporalAnalytics.actionable_bias_for_generation.isnot(None),
             )
             .order_by(TemporalAnalytics.analysis_date.desc(), TemporalAnalytics.id.desc())

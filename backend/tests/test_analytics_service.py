@@ -12,7 +12,7 @@ from app.schemas.analytics import (
     TemporalMetrics,
     TemporalPatternReviewResponse,
 )
-from app.schemas.enums import GameType
+from app.schemas.enums import BundleType, GameType
 from app.services.ai_service import AIService
 from app.services.analytics_service import TemporalAnalyticsService
 
@@ -236,3 +236,51 @@ async def test_analytics_api_endpoints(client, db_session, sample_draws):
     hist_data = hist_resp.json()
     assert len(hist_data) >= 1
     assert hist_data[0]["game_type"] == "LOTTO"
+
+
+@pytest.mark.asyncio
+async def test_get_latest_actionable_bias_resolves_bundle_key(db_session):
+    """High #4: get_latest_actionable_bias must search across all member
+    sub-games when queried with a bundle key, not just exact-match the key.
+    """
+    service = TemporalAnalyticsService()
+
+    # Insert bias records under sub-game keys (as run_weekly_analysis does)
+    from app.models.analytics import TemporalAnalytics
+    from app.schemas.analytics import ActionableBias
+
+    bias = ActionableBias(
+        suggested_sum_range=[120, 160],
+        favored_parity="3:3",
+        boost_numbers=[7, 14],
+        dampen_numbers=[50, 51],
+    )
+
+    lotto_record = TemporalAnalytics(
+        game_type="LOTTO",
+        timeframe="WEEKLY",
+        analysis_date=date.today(),
+        sample_draws_count=4,
+        sum_average=130.0,
+        sum_std_dev=10.0,
+        parity_ratio="3:3",
+        actionable_bias_for_generation=bias.model_dump(),
+        ai_insights="Test bias for LOTTO sub-game.",
+    )
+    db_session.add(lotto_record)
+    await db_session.commit()
+
+    # Query with bundle key — must find the sub-game record
+    result = await service.get_latest_actionable_bias(
+        db_session, BundleType.LOTTO_FAMILY
+    )
+    assert result is not None
+    assert result["boost_numbers"] == [7, 14]
+    assert result["suggested_sum_range"] == [120, 160]
+
+    # Query with a str bundle key too
+    result_str = await service.get_latest_actionable_bias(
+        db_session, "LOTTO_FAMILY"
+    )
+    assert result_str is not None
+    assert result_str["favored_parity"] == "3:3"

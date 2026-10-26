@@ -283,12 +283,12 @@ class PipelineOrchestrator:
                 b_type = BundleType.LOTTO_FAMILY
             member_games = [g.value for g in BUNDLE_GAMES.get(b_type, [])]
 
-            # Fetch matching official draws for member sub-games
+            # Fetch official draws for member sub-games matching the exact target draw date
             draws_query = (
                 select(Draw)
                 .where(
                     Draw.game_type.in_(member_games),
-                    Draw.draw_date >= board.target_draw_date,
+                    Draw.draw_date == board.target_draw_date,
                 )
                 .order_by(Draw.draw_date.asc(), Draw.draw_number.asc())
             )
@@ -297,9 +297,6 @@ class PipelineOrchestrator:
 
             if not matching_draws:
                 continue
-
-            matching_date = matching_draws[0].draw_date
-            matching_draws = [d for d in matching_draws if d.draw_date == matching_date]
 
             # Directive 24: Multi-Draw ROI Evaluation - evaluate board against all sub-draws
             bundle_eval = self.prize_service.evaluate_board_against_bundle_draws(

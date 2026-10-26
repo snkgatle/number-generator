@@ -1,6 +1,6 @@
 """Application configuration using Pydantic Settings."""
 from typing import List, Optional
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 import json
 
@@ -149,6 +149,16 @@ class Settings(BaseSettings):
         elif isinstance(v, list):
             return v
         return []
+
+    @model_validator(mode="after")
+    def guard_default_secrets_in_production(self):
+        """Refuse to start in production with the insecure default JWT secret key."""
+        if self.ENVIRONMENT.lower() == "production":
+            if self.JWT_SECRET_KEY == "lottomind-insecure-dev-secret-key-change-in-production-min32chars":
+                raise ValueError(
+                    "JWT_SECRET_KEY must be changed from the default value in production."
+                )
+        return self
 
 
 settings = Settings()

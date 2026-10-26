@@ -165,3 +165,44 @@ async def test_manual_pipeline_api_triggers(client, db_session):
         res2 = await client.post("/api/v1/generator/pipeline/post-draw")
         assert res2.status_code == 200
         assert res2.json()["status"] == "COMPLETED"
+
+
+@pytest.mark.asyncio
+async def test_post_draw_skips_board_without_matching_draw_date(orchestrator, db_session):
+    """High #5: Board must stay PENDING when no draw exists for its exact target date,
+    rather than being evaluated against a later draw date.
+    """
+    # Seed a draw for a different date
+    draw = Draw(
+        draw_number=3000,
+        game_type="LOTTO",
+        draw_date=date(2026, 10, 25),
+        numbers=[10, 20, 30, 40, 50, 52],
+        bonus_ball=5,
+    )
+    db_session.add(draw)
+
+    # Board targets a date with NO matching draw
+    board = GeneratedBoard(
+        game_type="LOTTO",
+        bundle_name="LOTTO_FAMILY",
+        target_draw_date=date(2026, 10, 18),
+        numbers=[1, 2, 3, 4, 5, 6],
+        confidence_score=85.0,
+        ai_reasoning="Test board for stale evaluation prevention.",
+        status=BoardStatus.PENDING.value,
+        cost=Decimal("10.00"),
+    )
+    db_session.add(board)
+    await db_session.commit()
+    await db_session.refresh(board)
+
+    with patch.object(orchestrator.scraper_service, "scrape_and_sync_all_games", return_value={"LOTTO": 0}):
+        res = await orchestrator.execute_post_draw_pipeline(db=db_session)
+        assert res["status"] == "COMPLETED"
+
+    # Board must still be PENDING — no draw matched its exact target_date
+    await db_session.refresh(board)
+    assert board.status == BoardStatus.PENDING.value, (
+        f"Expected PENDING, got {board.status}"
+    )

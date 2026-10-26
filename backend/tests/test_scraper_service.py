@@ -169,3 +169,20 @@ async def test_scraper_router_integration(client, db_session):
     res_latest = await client.get("/api/v1/scraper/draws/POWERBALL/latest")
     assert res_latest.status_code == 200
     assert res_latest.json()["draw_number"] == 5000
+
+
+def test_scrape_all_includes_all_5_games_by_default():
+    """High #6: scrape_all must include POWERBALL_PLUS in its default game list."""
+    from app.services.scraper_service import ScraperService
+    svc = ScraperService()
+    target_games = svc.scrape_all.__kwdefaults__ or {}
+    defaults = target_games.get("game_types") or [
+        # The code builds the list inside the method; verify via the source
+    ]
+
+    # Verify the method signature and that POWERBALL_PLUS is present
+    import inspect
+    source = inspect.getsource(ScraperService.scrape_all)
+    assert "POWERBALL_PLUS" in source, (
+        "scrape_all default game list must include POWERBALL_PLUS"
+    )

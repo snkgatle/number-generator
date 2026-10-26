@@ -232,3 +232,24 @@ async def test_game_bundle_model_and_multi_results(db_session):
     # 5. Verify 1-to-many relationship and total_prize property
     assert len(board.results) == 2
     assert board.total_prize == Decimal("3500050.00")
+
+
+def test_config_guards_default_jwt_secret_in_production():
+    """High #7: Settings must refuse to load in production with the default JWT_SECRET_KEY."""
+    import os
+    from app.core.config import Settings
+
+    with pytest.raises(ValueError, match="JWT_SECRET_KEY"):
+        Settings(
+            ENVIRONMENT="production",
+            JWT_SECRET_KEY="lottomind-insecure-dev-secret-key-change-in-production-min32chars",
+            _env_file=None,
+        )
+
+    # Should succeed with a non-default key in production
+    settings = Settings(
+        ENVIRONMENT="production",
+        JWT_SECRET_KEY="a-very-strong-production-secret-key-min-32-chars",
+        _env_file=None,
+    )
+    assert settings.JWT_SECRET_KEY == "a-very-strong-production-secret-key-min-32-chars"

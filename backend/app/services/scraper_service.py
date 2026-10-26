@@ -345,6 +345,7 @@ class ScraperService:
             GameType.POWERBALL,
             GameType.LOTTO_PLUS_1,
             GameType.LOTTO_PLUS_2,
+            GameType.POWERBALL_PLUS,
         ]
 
         details: List[ScrapeGameResult] = []

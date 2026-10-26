@@ -11,7 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.draw import Draw
 from app.schemas.board import AIBoardRecommendation
-from app.schemas.enums import BUNDLE_GAMES, BUNDLE_RULES, BundleType, GAME_RULES, GameType
+from app.schemas.enums import (
+    BUNDLE_GAMES,
+    BUNDLE_RULES,
+    BundleType,
+    GAME_RULES,
+    GameType,
+    game_key,
+    resolve_rules,
+)
 from app.schemas.stats import (
     DeltaDistributionReport,
     DeltaFrequency,
@@ -295,7 +303,7 @@ class StatsService:
         self,
         boards: List[Union[AIBoardRecommendation, Dict[str, Any]]],
         historical_draws: List[Draw],
-        game_type: GameType,
+        game_type: Union[GameType, BundleType, str],
         iterations: int = 10000,
     ) -> List[MonteCarloSimulationResult]:
         """Directive 15: Local Python Monte Carlo simulation (minimum 10,000 iterations).
@@ -303,7 +311,7 @@ class StatsService:
         Stress-tests proposed boards against weighted historical draw probabilities.
         Logs simulated hit rates.
         """
-        rules = GAME_RULES.get(game_type, {})
+        rules = resolve_rules(game_type)
         main_min = rules.get("main_number_min", 1)
         main_max = rules.get("main_number_max", 52)
         main_count = rules.get("main_numbers_count", 6)
@@ -323,7 +331,7 @@ class StatsService:
         # 2. Generate simulated draws
         logger.info(
             f"Executing Monte Carlo stress test ({iterations} iterations) for {len(boards)} "
-            f"{game_type.value} boards using weighted probability distribution..."
+            f"{game_key(game_type)} boards using weighted probability distribution..."
         )
         simulated_draws = [
             set(np.random.choice(balls, size=main_count, replace=False, p=probabilities))

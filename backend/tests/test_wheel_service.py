@@ -1,7 +1,7 @@
 """Unit tests for Combinatorial Abbreviated Wheeling Service (Directive 18 & 20)."""
 import pytest
 
-from app.schemas.enums import GameType
+from app.schemas.enums import BundleType, GameType
 from app.services.wheel_service import WheelService
 
 
@@ -83,3 +83,54 @@ def test_wheel_candidate_pool_padding_undersized():
     # Original 3 numbers should still be present
     for n in short_pool:
         assert n in boards[0].numbers
+
+
+def test_wheel_powerball_bundle_produces_valid_boards():
+    """Regression: Critical #2 — POWERBALL_FAMILY bundle must wheel into 5-number boards
+    with a Powerball (1-16), not 6-number boards without one.
+    """
+    wheel_svc = WheelService()
+    pool = [4, 14, 25, 33, 41, 47, 49, 50]
+
+    boards = wheel_svc.wheel_candidate_pool(
+        pool=pool,
+        board_count=2,
+        game_type=BundleType.POWERBALL_FAMILY,
+        bonus_or_powerball=12,
+    )
+
+    assert len(boards) == 2
+    for b in boards:
+        assert len(b.numbers) == 5, f"PowerBall boards must have 5 numbers, got {len(b.numbers)}"
+        assert all(1 <= n <= 50 for n in b.numbers), "Numbers must be within 1-50"
+        assert b.bonus_or_powerball == 12, "Powerball must be set"
+        assert 1 <= b.bonus_or_powerball <= 16
+
+
+def test_wheel_accepts_str_game_type():
+    """Regression: Critical #2 — wheel_candidate_pool must accept plain string game_type
+    (the pipeline passes bundle.value as a str).
+    """
+    wheel_svc = WheelService()
+    pool = [4, 14, 25, 33, 41, 47, 49, 50]
+
+    boards_str = wheel_svc.wheel_candidate_pool(
+        pool=pool,
+        board_count=2,
+        game_type="POWERBALL_FAMILY",
+        bonus_or_powerball=7,
+    )
+    assert len(boards_str) == 2
+    for b in boards_str:
+        assert len(b.numbers) == 5
+        assert b.bonus_or_powerball == 7
+
+    boards_lotto_str = wheel_svc.wheel_candidate_pool(
+        pool=[5, 12, 19, 23, 34, 38, 42, 45],
+        board_count=2,
+        game_type="LOTTO_FAMILY",
+    )
+    assert len(boards_lotto_str) == 2
+    for b in boards_lotto_str:
+        assert len(b.numbers) == 6
+        assert b.bonus_or_powerball is None

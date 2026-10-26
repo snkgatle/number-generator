@@ -7,11 +7,11 @@ Adheres to:
 """
 from itertools import combinations
 import math
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from loguru import logger
 
 from app.schemas.board import AIBoardRecommendation
-from app.schemas.enums import GAME_RULES, GameType
+from app.schemas.enums import BundleType, GameType, game_key, resolve_rules
 from app.services.stats_service import StatsService
 
 
@@ -25,7 +25,7 @@ class WheelService:
         self,
         pool: List[int],
         board_count: int,
-        game_type: GameType,
+        game_type: Union[GameType, BundleType, str],
         bonus_or_powerball: Optional[int] = None,
         base_confidence: float = 85.0,
         custom_reasoning: Optional[str] = None,
@@ -35,7 +35,7 @@ class WheelService:
         Directive 18: Abbreviated Wheeling guarantees combinatorial coverage of the pool
         within the budget-constrained board count B.
         """
-        rules = GAME_RULES.get(game_type, {})
+        rules = resolve_rules(game_type)
         k = rules.get("main_numbers_count", 6)
         min_num = rules.get("main_number_min", 1)
         max_num = rules.get("main_number_max", 52)
@@ -47,7 +47,7 @@ class WheelService:
         if len(clean_pool) < k:
             logger.warning(
                 f"Candidate pool size ({len(clean_pool)}) is smaller than required board size ({k}). "
-                f"Auto-padding with non-calendar high numbers for {game_type.value}."
+                f"Auto-padding with non-calendar high numbers for {game_key(game_type)}."
             )
             # Pad with numbers from max_num down
             pad_candidates = [n for n in range(max_num, min_num - 1, -1) if n not in clean_pool]
@@ -140,7 +140,7 @@ class WheelService:
             )
 
         logger.info(
-            f"Wheeled pool of {len(clean_pool)} numbers into {len(results)} boards for {game_type.value} "
+            f"Wheeled pool of {len(clean_pool)} numbers into {len(results)} boards for {game_key(game_type)} "
             f"with {coverage_pct}% pair coverage and EV filtering."
         )
         return results

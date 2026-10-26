@@ -4,6 +4,8 @@ Directives:
 - Directive 26: Session Management via HttpOnly, Secure, SameSite=Strict cookie with 24-hour expiration.
 - Directive 28: Route Protection: All existing /api/v1/ endpoints must require the JWT dependency and return 401.
 """
+import hmac
+import secrets
 from typing import Any, Dict, Optional
 from fastapi import Cookie, Depends, HTTPException, Header, Request, status
 from loguru import logger
@@ -34,9 +36,6 @@ async def get_token_from_request(
     return None
 
 
-from jose import jwt as jose_jwt
-
-
 async def require_authenticated_user(
     token: Optional[str] = Depends(get_token_from_request),
     scheduler_token: Optional[str] = Header(default=None, alias="X-Scheduler-Token"),
@@ -50,33 +49,45 @@ async def require_authenticated_user(
     """
     secret = settings.effective_scheduler_secret
 
-    # 1. Check custom X-Scheduler-Token header
-    if scheduler_token and scheduler_token == secret:
+    # 1. Check custom X-Scheduler-Token header (constant-time comparison)
+    if scheduler_token and secret and hmac.compare_digest(scheduler_token, secret):
         logger.debug("Access granted via X-Scheduler-Token header.")
         return {"sub": "cloud-scheduler", "role": "scheduler"}
 
-    # 2. Check if token matches scheduler secret directly
-    if token and token == secret:
+    # 2. Check if token matches scheduler secret directly (constant-time comparison)
+    if token and secret and hmac.compare_digest(token, secret):
         logger.debug("Access granted via Bearer scheduler secret.")
         return {"sub": "cloud-scheduler", "role": "scheduler"}
 
     # 3. Check Google Cloud Service Account OIDC token (from Cloud Scheduler)
-    if token:
+    if token and settings.SCHEDULER_AUDIENCE:
         try:
-            unverified = jose_jwt.get_unverified_claims(token)
-            iss = unverified.get("iss", "")
-            email = unverified.get("email", "")
-            if (
-                iss in ("https://accounts.google.com", "accounts.google.com")
-                and (
-                    email.endswith("@developer.gserviceaccount.com")
-                    or email.endswith("@appspot.gserviceaccount.com")
-                )
-            ):
-                logger.info(f"Access granted to Google Service Account OIDC token: {email}")
-                return {"sub": email, "role": "scheduler"}
-        except Exception:
-            pass
+            from google.oauth2 import id_token
+            from google.auth.transport import requests as google_requests
+
+            # Verify the token signature, issuer, and expiration using Google's public keys
+            request_adapter = google_requests.Request()
+            claims = id_token.verify_oauth2_token(
+                token, request_adapter, settings.SCHEDULER_AUDIENCE
+            )
+
+            # Verify issuer is Google
+            issuer = claims.get("iss", "")
+            if issuer not in ("https://accounts.google.com", "accounts.google.com"):
+                logger.warning(f"OIDC token has invalid issuer: {issuer}")
+            else:
+                # Verify email is a Google service account
+                email = claims.get("email", "")
+                if email.endswith("@developer.gserviceaccount.com") or email.endswith(
+                    "@appspot.gserviceaccount.com"
+                ):
+                    logger.info(f"Access granted to Google Service Account OIDC token: {email}")
+                    return {"sub": email, "role": "scheduler"}
+                else:
+                    logger.warning(f"OIDC token email is not a service account: {email}")
+        except Exception as exc:
+            # Token verification failed - continue to session JWT check
+            logger.debug(f"Google OIDC token verification failed: {exc}")
 
     # 4. Standard User Session JWT Verification (Directive 26)
     if not token:

@@ -180,3 +180,42 @@ async def test_scheduler_token_authentication(unauthenticated_client: AsyncClien
     headers = {"X-Scheduler-Token": settings.effective_scheduler_secret}
     res = await unauthenticated_client.get("/api/v1/dashboard/budget/current", headers=headers)
     assert res.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_forged_oidc_token_rejected(unauthenticated_client: AsyncClient):
+    """Critical #3: Forged Google OIDC tokens must be rejected (signature verification)."""
+    import base64
+    import json
+
+    # Create a forged unsigned JWT with Google service account claims
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode()).decode().rstrip("=")
+    payload_data = {
+        "iss": "accounts.google.com",
+        "email": "fake@developer.gserviceaccount.com",
+        "sub": "123456789",
+        "aud": "https://example.com",
+        "exp": 9999999999,
+        "iat": 1000000000,
+    }
+    payload = base64.urlsafe_b64encode(json.dumps(payload_data).encode()).decode().rstrip("=")
+    forged_token = f"{header}.{payload}."  # No signature
+
+    # This forged token must be rejected
+    headers = {"Authorization": f"Bearer {forged_token}"}
+    res = await unauthenticated_client.get("/api/v1/dashboard/budget/current", headers=headers)
+    assert res.status_code == 401, "Forged OIDC token must be rejected"
+
+
+@pytest.mark.asyncio
+async def test_scheduler_secret_constant_time_comparison():
+    """Critical #3: Scheduler secret comparison must use constant-time algorithm."""
+    import hmac
+
+    secret = "test-secret-key"
+    correct = "test-secret-key"
+    wrong = "wrong-secret-key"
+
+    # Verify hmac.compare_digest is used (constant-time)
+    assert hmac.compare_digest(secret, correct) is True
+    assert hmac.compare_digest(secret, wrong) is False

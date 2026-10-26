@@ -137,6 +137,26 @@ BUNDLE_DRAW_DAYS = {
 }
 
 
+def game_key(game_or_bundle: Union[GameType, BundleType, str]) -> str:
+    """Normalizes a GameType, BundleType, or raw string to its canonical string key."""
+    return game_or_bundle.value if hasattr(game_or_bundle, "value") else str(game_or_bundle)
+
+
+def resolve_rules(game_or_bundle: Union[GameType, BundleType, str]) -> Dict:
+    """Resolves the matrix rules for any game or bundle identifier (enum or raw string).
+
+    Returns BUNDLE_RULES for bundle keys, GAME_RULES for sub-game keys,
+    and an empty dict for unrecognized values.
+    """
+    key = game_key(game_or_bundle)
+    if key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+        return BUNDLE_RULES.get(BundleType(key), {})
+    try:
+        return GAME_RULES.get(GameType(key), {})
+    except ValueError:
+        return {}
+
+
 def get_next_draw_date(game_or_bundle: Union[GameType, BundleType, str], ref_date: Optional[date] = None) -> date:
     """Calculates upcoming scheduled draw date for a given game or bundle."""
     base = ref_date or date.today()

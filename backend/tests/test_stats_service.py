@@ -318,3 +318,26 @@ async def test_bundle_stats_and_intersection(db_session):
     assert "sub_draw_breakdown" in prompt_vars
     assert "statistical_intersection" in prompt_vars
     assert "7" in prompt_vars["statistical_intersection"]
+
+
+def test_monte_carlo_accepts_str_game_type():
+    """Regression: Critical #1 — run_monte_carlo_stress_test must accept str game_type
+    (the pipeline passes bundle.value as a plain string, not an enum).
+    """
+    service = StatsService()
+    draws = [
+        Draw(draw_number=1, game_type="LOTTO", draw_date=date(2026, 10, 1), numbers=[1, 2, 3, 4, 5, 6]),
+        Draw(draw_number=2, game_type="LOTTO", draw_date=date(2026, 10, 8), numbers=[7, 8, 9, 10, 11, 12]),
+    ]
+    boards = [{"numbers": [1, 2, 3, 4, 5, 6], "bonus_or_powerball": None}]
+
+    result = service.run_monte_carlo_stress_test(
+        boards=boards, historical_draws=draws, game_type="LOTTO_FAMILY", iterations=10
+    )
+    assert len(result) == 1
+    assert result[0].iterations == 10
+
+    result_bundle = service.run_monte_carlo_stress_test(
+        boards=boards, historical_draws=draws, game_type="POWERBALL_FAMILY", iterations=10
+    )
+    assert len(result_bundle) == 1

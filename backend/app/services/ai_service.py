@@ -33,7 +33,7 @@ from app.schemas.board import (
     AIGenerationResponse,
     PostDrawFeedbackResponse,
 )
-from app.schemas.enums import BUNDLE_RULES, BundleType, GAME_RULES, GameType
+from app.schemas.enums import BUNDLE_RULES, BundleType, GAME_RULES, GameType, game_key, resolve_rules
 from app.services.prompts import (
     MONTHLY_DEEP_DIVE_SYSTEM_PROMPT,
     MONTHLY_DEEP_DIVE_USER_PROMPT,
@@ -183,16 +183,13 @@ class AIService:
         after 3 retries, falls back to deterministic statistical generation, and if that
         fails, to secrets cryptographically random generation.
         """
-        raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
+        raw_key = game_key(game_type)
         logger.info(
             f"Invoking Qwen-Max generation for {raw_key} on {target_draw_date} "
             f"({allocated_boards} boards requested)"
         )
 
-        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
-            rules = BUNDLE_RULES.get(BundleType(raw_key), {})
-        else:
-            rules = GAME_RULES.get(game_type, {})
+        rules = resolve_rules(raw_key)
 
         if rules.get("has_powerball"):
             rules_summary = (
@@ -317,11 +314,20 @@ class AIService:
                     custom_reasoning=custom_reason,
                 )
                 if wheeled:
+                    original_boards = validated_response.boards
                     validated_response.boards = wheeled
-                    logger.info(
-                        f"Directive 18: Successfully wheeled {len(validated_response.pool)} candidates "
-                        f"into {len(wheeled)} boards for {game_type.value}."
-                    )
+                    try:
+                        validated_response.validate_against_game_rules()
+                        logger.info(
+                            f"Directive 18: Successfully wheeled {len(validated_response.pool)} candidates "
+                            f"into {len(wheeled)} boards for {game_key(game_type)}."
+                        )
+                    except ValueError as validation_err:
+                        logger.warning(
+                            f"Directive 18: Wheeled boards failed game-rule validation ({validation_err}). "
+                            f"Reverting to original boards."
+                        )
+                        validated_response.boards = original_boards
             except Exception as wheel_err:
                 logger.warning(f"Combinatorial wheeling encountered error, retaining original boards: {wheel_err}")
 
@@ -343,7 +349,7 @@ class AIService:
 
         logger.info(
             f"Successfully generated and validated {len(validated_response.boards)} boards "
-            f"for {game_type.value}."
+            f"for {game_key(game_type)}."
         )
         return validated_response
 
@@ -355,11 +361,8 @@ class AIService:
         temporal_bias: Optional[Dict[str, Any]] = None,
     ) -> AIGenerationResponse:
         """Directive 13: Tier 2 fallback - Deterministic statistical generation."""
-        raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
-        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
-            rules = BUNDLE_RULES.get(BundleType(raw_key), {})
-        else:
-            rules = GAME_RULES.get(game_type, {})
+        raw_key = game_key(game_type)
+        rules = resolve_rules(raw_key)
         main_count = rules.get("main_numbers_count", 6)
         main_min = rules.get("main_number_min", 1)
         main_max = rules.get("main_number_max", 52)
@@ -469,7 +472,7 @@ class AIService:
                 )
 
         return AIGenerationResponse(
-            game_type=game_type.value,
+            game_type=game_key(game_type),
             boards=boards,
             pool=candidate_pool if candidate_pool else None,
             statistical_analysis_summary="Graceful degradation Tier 2: Deterministic statistical fallback with EV-optimized wheeling applied.",
@@ -481,11 +484,8 @@ class AIService:
         allocated_boards: int,
     ) -> AIGenerationResponse:
         """Directive 13: Tier 3 fallback - Cryptographically secure random generation via secrets."""
-        raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
-        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
-            rules = BUNDLE_RULES.get(BundleType(raw_key), {})
-        else:
-            rules = GAME_RULES.get(game_type, {})
+        raw_key = game_key(game_type)
+        rules = resolve_rules(raw_key)
         main_count = rules.get("main_numbers_count", 6)
         main_min = rules.get("main_number_min", 1)
         main_max = rules.get("main_number_max", 52)
@@ -512,7 +512,7 @@ class AIService:
             )
 
         return AIGenerationResponse(
-            game_type=game_type.value,
+            game_type=game_key(game_type),
             boards=boards,
             statistical_analysis_summary="Graceful degradation Tier 3: Cryptographically random fallback applied.",
         )

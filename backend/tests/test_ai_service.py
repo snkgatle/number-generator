@@ -2,7 +2,7 @@
 from datetime import date
 from decimal import Decimal
 from http import HTTPStatus
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.models.board import GeneratedBoard, BoardResult
@@ -296,3 +296,32 @@ async def test_analytics_model_dispatch(ai_service):
         # Confirm model='qwen3.8-flash' was explicitly passed
         call_kwargs = mock_call.call_args.kwargs
         assert call_kwargs.get("model") == "qwen3.8-flash"
+
+
+@pytest.mark.asyncio
+async def test_generate_boards_accepts_str_game_type_with_historical_draws():
+    """Regression: Critical #1 — generate_boards must not crash when game_type is a
+    plain string (as the pipeline passes bundle.value) and historical_draws is provided.
+    The Monte Carlo step and fallback paths must handle str game_type without AttributeError.
+    """
+    from app.models.draw import Draw
+
+    service = AIService()
+    draws = [
+        Draw(draw_number=1, game_type="LOTTO", draw_date=date(2026, 10, 1), numbers=[1, 2, 3, 4, 5, 6]),
+        Draw(draw_number=2, game_type="LOTTO", draw_date=date(2026, 10, 8), numbers=[7, 8, 9, 10, 11, 12]),
+    ]
+
+    with patch.object(service, "call_qwen_json", new_callable=AsyncMock) as mock_call:
+        mock_call.side_effect = AIServiceError("Simulated Qwen failure")
+
+        response = await service.generate_boards(
+            game_type="LOTTO_FAMILY",
+            target_draw_date=date(2026, 10, 25),
+            allocated_boards=1,
+            stats_context={},
+            historical_draws=draws,
+        )
+
+        assert len(response.boards) >= 1
+        assert response.game_type == "LOTTO_FAMILY"

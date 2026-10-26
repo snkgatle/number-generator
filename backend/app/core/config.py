@@ -107,6 +107,10 @@ class Settings(BaseSettings):
         default=None,
         description="Shared secret for authenticating Google Cloud Scheduler HTTP triggers (Directive 28)",
     )
+    SCHEDULER_AUDIENCE: Optional[str] = Field(
+        default=None,
+        description="Expected audience for Google Cloud Scheduler OIDC tokens (typically the Cloud Run service URL)",
+    )
 
     @property
     def effective_scheduler_secret(self) -> str:

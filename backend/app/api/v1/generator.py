@@ -91,6 +91,8 @@ async def generate_boards(
     """Trigger AI generation pipeline subject to Directive 3 Budget Circuit Breaker."""
     requested_boards = payload.allocated_boards or 1
     bundle_type = payload.resolved_bundle()
+    target_date = payload.target_draw_date or get_next_draw_date(bundle_type)
+    cycle_key = budget_service.current_year_month(target_date)
 
     # Query GameBundle entity to link bundle_id and cost
     bundle_res = await db.execute(
@@ -115,7 +117,7 @@ async def generate_boards(
             )
     except BudgetExhaustedException:
         await notifier.notify_budget_exhaustion(
-            year_month=date.today().strftime("%Y-%m"),
+            year_month=cycle_key,
             remaining_boards=0,
             total_budget=str(settings.DEFAULT_MONTHLY_BUDGET),
         )
@@ -135,8 +137,6 @@ async def generate_boards(
 
     # Directive 11: Fetch actionable temporal bias
     temporal_bias = await analytics_service.get_latest_actionable_bias(db, bundle_type)
-
-    target_date = payload.target_draw_date or get_next_draw_date(bundle_type)
 
     # Phase 4: Qwen-Max Generation with Strict JSON Enforcement & Monte Carlo Stress Testing (Directive 15)
     try:
@@ -192,7 +192,7 @@ async def generate_boards(
     await db.commit()
 
     # Deduct quota from monthly budget
-    await budget_service.record_board_usage(db, boards_used=len(created_boards))
+    await budget_service.record_board_usage(db, boards_used=len(created_boards), year_month=cycle_key)
 
     # Refresh entities for response serialization
     for b in created_boards:

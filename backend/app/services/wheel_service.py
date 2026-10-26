@@ -18,6 +18,8 @@ from app.services.stats_service import StatsService
 class WheelService:
     """Implements combinatorial abbreviated wheeling for lottery ticket generation."""
 
+    MAX_POOL_SIZE: int = 15
+
     def __init__(self):
         self.stats_service = StatsService()
 
@@ -41,8 +43,14 @@ class WheelService:
         max_num = rules.get("main_number_max", 52)
         has_pb = rules.get("has_powerball", False)
 
-        # 1. Clean and validate candidate pool
-        clean_pool = sorted(list({int(n) for n in pool if min_num <= int(n) <= max_num}))
+        # 1. Clean and validate candidate pool, cap to MAX_POOL_SIZE
+        raw_pool = list({int(n) for n in pool if min_num <= int(n) <= max_num})
+        clean_pool = sorted(raw_pool[:self.MAX_POOL_SIZE])
+        if len(raw_pool) > self.MAX_POOL_SIZE:
+            logger.warning(
+                f"Candidate pool size ({len(raw_pool)}) exceeds MAX_POOL_SIZE ({self.MAX_POOL_SIZE}). "
+                f"Truncating to top {self.MAX_POOL_SIZE} candidates for {game_key(game_type)}."
+            )
 
         if len(clean_pool) < k:
             logger.warning(

@@ -16,8 +16,8 @@ class BudgetService:
         self.engine = BudgetEngine()
 
     @staticmethod
-    def current_year_month() -> str:
-        return BudgetEngine.current_year_month()
+    def current_year_month(target_date=None) -> str:
+        return BudgetEngine.current_year_month(target_date)
 
     async def get_or_create_monthly_budget(
         self, db: AsyncSession, year_month: Optional[str] = None
@@ -30,9 +30,9 @@ class BudgetService:
         return await self.engine.check_circuit_breaker(db, boards_requested=boards_requested)
 
     async def record_board_usage(
-        self, db: AsyncSession, boards_used: int = 1
+        self, db: AsyncSession, boards_used: int = 1, year_month: Optional[str] = None
     ) -> MonthlyBudget:
-        return await self.engine.record_board_allocation(db, boards_count=boards_used)
+        return await self.engine.record_board_allocation(db, boards_count=boards_used, year_month=year_month)
 
 
 __all__ = ["BudgetService", "BudgetExhaustedException"]

@@ -278,14 +278,27 @@ class BudgetEngine:
         """Deducts boards from the monthly quota and persists spend.
 
         If remaining_boards drops to 0, sets is_exhausted = True.
+        Clamps usage to remaining quota to prevent over-deduction.
         """
-        _, budget = await self.check_circuit_breaker(
+        allowed, budget = await self.check_circuit_breaker(
             db, boards_requested=boards_count, year_month=year_month
         )
 
-        cost = budget.cost_per_board * boards_count
-        budget.used_boards += boards_count
-        budget.remaining_boards = max(0, budget.remaining_boards - boards_count)
+        if not allowed or budget.remaining_boards <= 0 or budget.is_exhausted:
+            raise BudgetExhaustedException(
+                f"Cannot allocate {boards_count} boards: only {budget.remaining_boards} remaining."
+            )
+
+        clamped_count = min(boards_count, budget.remaining_boards)
+        if clamped_count < boards_count:
+            logger.warning(
+                f"Board allocation clamped from {boards_count} to {clamped_count} "
+                f"(only {budget.remaining_boards} remaining)."
+            )
+
+        cost = budget.cost_per_board * clamped_count
+        budget.used_boards += clamped_count
+        budget.remaining_boards = max(0, budget.remaining_boards - clamped_count)
         budget.spent_amount += cost
 
         if budget.remaining_boards == 0:

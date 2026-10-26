@@ -113,14 +113,15 @@ class PipelineOrchestrator:
 
         total_generated = 0
         results_by_game = {}
+        cycle_key = self.budget_engine.current_year_month(ref_date)
 
         # 1. Directive 3 Circuit Breaker Check
         try:
-            allowed, budget = await self.budget_engine.check_circuit_breaker(db, boards_requested=1)
+            allowed, budget = await self.budget_engine.check_circuit_breaker(db, boards_requested=1, year_month=cycle_key)
         except BudgetExhaustedException as exc:
             logger.error(f"Pre-Draw Pipeline HALTED: {exc}")
             await self.notifier.notify_budget_exhaustion(
-                year_month=ref_date.strftime("%Y-%m"),
+                year_month=cycle_key,
                 remaining_boards=0,
                 total_budget=str(settings.DEFAULT_MONTHLY_BUDGET),
             )
@@ -224,7 +225,7 @@ class PipelineOrchestrator:
             # Deduct quota from monthly budget
             if created_for_bundle:
                 budget = await self.budget_engine.record_board_allocation(
-                    db, boards_count=len(created_for_bundle)
+                    db, boards_count=len(created_for_bundle), year_month=cycle_key
                 )
                 total_generated += len(created_for_bundle)
                 results_by_game[bundle.value] = {

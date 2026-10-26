@@ -36,7 +36,7 @@ class Draw(Base):
     powerball: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     machine_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     ball_set: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    draw_time: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    draw_time: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     raw_data: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     bundle_id: Mapped[Optional[int]] = mapped_column(
         Integer,

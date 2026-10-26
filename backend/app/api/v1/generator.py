@@ -1,5 +1,5 @@
 """Generator Router - endpoints for AI-driven board generation, retrieval, and post-draw feedback."""
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -80,6 +80,47 @@ async def get_board_by_id(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Generated board #{board_id} not found.",
         )
+    return board
+
+
+@router.patch("/boards/{board_id}/played", response_model=BoardWithResultResponse)
+async def toggle_board_played(
+    board_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Directive 10: Toggle the manual-played flag on a pending board.
+
+    Marks the board as PLAYED once the user has entered it on the official
+    lottery platform, or reverts it to PENDING. Evaluated boards cannot change.
+    """
+    query = (
+        select(GeneratedBoard)
+        .options(selectinload(GeneratedBoard.results))
+        .where(GeneratedBoard.id == board_id)
+    )
+    result = await db.execute(query)
+    board = result.scalar_one_or_none()
+    if not board:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Generated board #{board_id} not found.",
+        )
+
+    if board.status not in ("PENDING", "PLAYED"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Board #{board_id} is already evaluated ({board.status}); played flag cannot change.",
+        )
+
+    if board.status == "PLAYED":
+        board.status = "PENDING"
+        board.played_at = None
+    else:
+        board.status = "PLAYED"
+        board.played_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(board)
     return board
 
 
@@ -172,7 +213,15 @@ async def generate_boards(
     # Persist generated boards and deduct quota
     created_boards: List[GeneratedBoard] = []
 
+    # Directive 15: map Monte Carlo results back to boards surviving dedup
+    mc_by_numbers = {
+        tuple(m["numbers"]): m for m in (ai_response.monte_carlo or [])
+    }
+
     for rec in unique_boards:
+        # Directive 20: compute EV score locally (fast, deterministic)
+        ev_report = stats_service.calculate_ev_score(rec.numbers)
+        mc_entry = mc_by_numbers.get(tuple(rec.numbers))
         board_entity = GeneratedBoard(
             bundle_id=bundle_id,
             budget_id=budget.id,
@@ -185,6 +234,8 @@ async def generate_boards(
             ai_reasoning=rec.reasoning,
             cost=board_cost,
             status="PENDING",
+            simulated_hit_rate=mc_entry["simulated_hit_rate"] if mc_entry else None,
+            ev_score=ev_report.ev_score,
         )
         db.add(board_entity)
         created_boards.append(board_entity)

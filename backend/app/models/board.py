@@ -76,7 +76,22 @@ class GeneratedBoard(Base):
         nullable=False,
         default="PENDING",
         index=True,
-        comment="Status: PENDING, WON, LOST, VOID",
+        comment="Status: PENDING, PLAYED, WON, LOST, VOID",
+    )
+    simulated_hit_rate: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Directive 15: Monte Carlo simulated hit rate (0.0-1.0) from 10k iterations",
+    )
+    ev_score: Mapped[Optional[float]] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Directive 20: Expected Value score (0-100) penalizing human-biased combinations",
+    )
+    played_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Directive 10: timestamp when user manually played this board on the official platform",
     )
     cost: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),

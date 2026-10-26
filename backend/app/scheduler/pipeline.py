@@ -203,7 +203,12 @@ class PipelineOrchestrator:
 
             # Persist Boards
             created_for_bundle: List[GeneratedBoard] = []
+            mc_by_numbers = {
+                tuple(m["numbers"]): m for m in (ai_response.monte_carlo or [])
+            }
             for rec in unique_boards:
+                ev_report = self.stats_service.calculate_ev_score(rec.numbers)
+                mc_entry = mc_by_numbers.get(tuple(rec.numbers))
                 board = GeneratedBoard(
                     bundle_id=bundle_entity.id if bundle_entity else None,
                     budget_id=budget.id,
@@ -216,6 +221,8 @@ class PipelineOrchestrator:
                     ai_reasoning=rec.reasoning,
                     cost=cost_per_board,
                     status=BoardStatus.PENDING.value,
+                    simulated_hit_rate=mc_entry["simulated_hit_rate"] if mc_entry else None,
+                    ev_score=ev_report.ev_score,
                 )
                 db.add(board)
                 created_for_bundle.append(board)
@@ -268,7 +275,11 @@ class PipelineOrchestrator:
 
         pending_query = (
             select(GeneratedBoard)
-            .where(GeneratedBoard.status == BoardStatus.PENDING.value)
+            .where(
+                GeneratedBoard.status.in_(
+                    [BoardStatus.PENDING.value, BoardStatus.PLAYED.value]
+                )
+            )
             .order_by(GeneratedBoard.target_draw_date.asc())
         )
         res = await db.execute(pending_query)

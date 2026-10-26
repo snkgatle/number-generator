@@ -25,6 +25,7 @@ class BundleType(str, Enum):
 class BoardStatus(str, Enum):
     """Lifecycle statuses for generated boards."""
     PENDING = "PENDING"
+    PLAYED = "PLAYED"
     EVALUATED = "EVALUATED"
     WON = "WON"
     LOST = "LOST"

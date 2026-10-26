@@ -1,9 +1,9 @@
-import React from 'react';
-import { MonthlyBudget, CircuitBreakerStatus } from '../services/api';
+import React, { useEffect, useState } from 'react';
+import { MonthlyBudget, CircuitBreakerStatus, AllocationPlan, fetchAllocationPlan } from '../services/api';
 import { ProgressBar } from './ui';
 import { formatZAR } from '../utils/format';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
-import { Wallet, ShieldAlert, Sparkles, TrendingUp } from 'lucide-react';
+import { CalendarClock, Gauge, ShieldAlert, Sparkles, TrendingUp, Wallet } from 'lucide-react';
 
 interface BudgetTrackerProps {
   budget: MonthlyBudget | null;
@@ -12,6 +12,14 @@ interface BudgetTrackerProps {
 }
 
 export const BudgetTracker: React.FC<BudgetTrackerProps> = ({ budget, circuitBreaker, loading }) => {
+  const [plan, setPlan] = useState<AllocationPlan | null>(null);
+
+  useEffect(() => {
+    fetchAllocationPlan()
+      .then(setPlan)
+      .catch(() => setPlan(null));
+  }, [budget?.remaining_boards]);
+
   if (loading && !budget) {
     return (
       <div className="card card-body space-y-4">
@@ -169,6 +177,38 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({ budget, circuitBre
             </div>
           </div>
         </div>
+
+        {/* Budget Pacing (Directive 3/23: projected draws vs remaining quota) */}
+        {plan && plan.projected_draws_count > 0 && (
+          <div className="flex flex-col gap-2 pt-2 border-t border-line/60 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2 text-xs text-zinc-400">
+              <div className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/10 border border-amber-500/25 text-amber-400">
+                <CalendarClock className="h-3.5 w-3.5" />
+              </div>
+              <span>
+                <span className="font-medium text-zinc-300">Budget pacing:</span>{' '}
+                <span className="num">{plan.remaining_boards}</span> boards left across{' '}
+                <span className="num">{plan.projected_draws_count}</span> scheduled draws —{' '}
+                <span
+                  className={
+                    plan.remaining_boards < plan.projected_draws_count
+                      ? 'text-amber-300 font-medium'
+                      : 'text-emerald-300 font-medium'
+                  }
+                >
+                  {plan.remaining_boards >= plan.projected_draws_count
+                    ? 'surplus available, bonus boards possible at high confidence'
+                    : `${Math.max(1, Math.floor(plan.remaining_boards / plan.projected_draws_count))} board per draw to stay in quota`}
+                </span>
+                .
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-2xs font-mono text-zinc-500">
+              <Gauge className="h-3 w-3" />
+              <span>Bonus threshold ≥{plan.confidence_threshold.toFixed(0)}% confidence</span>
+            </div>
+          </div>
+        )}
 
         {/* Linear Progress Indicator */}
         <div className="space-y-2 pt-2 border-t border-line/60">

@@ -5,6 +5,7 @@ import {
   fetchRecentDraws,
   fetchPostDrawFeedback,
   triggerPostDrawPipeline,
+  markBoardPlayed,
   BoardWithResult,
   Draw,
   PostDrawFeedback,
@@ -29,7 +30,11 @@ import {
   Sparkles,
   Ticket,
   X,
+  CheckCircle2,
+  Circle,
+  Hourglass,
 } from 'lucide-react';
+import { useDrawCountdown } from '../utils/useCountdown';
 import {
   AreaChart,
   Area,
@@ -42,6 +47,17 @@ import {
   Pie,
   Cell,
 } from 'recharts';
+
+export const DrawCountdownBadge: React.FC<{ targetDate: string }> = ({ targetDate }) => {
+  const countdown = useDrawCountdown(targetDate);
+  if (!countdown) return null;
+  return (
+    <span className="badge badge-warning gap-1" title="Time until this draw closes (~21:00 SAST)">
+      <Hourglass className="h-3 w-3" />
+      <span className="num">{countdown}</span>
+    </span>
+  );
+};
 
 export const ResultsView: React.FC = () => {
   const [boards, setBoards] = useState<BoardWithResult[]>([]);
@@ -75,6 +91,30 @@ export const ResultsView: React.FC = () => {
     loadData();
   }, [selectedGame]);
 
+  // Auto-refresh while there are pending boards and the tab is visible
+  const hasPending = boards.some(
+    (b) => (b.status === 'PENDING' || b.status === 'PLAYED') && (!b.results || b.results.length === 0) && !b.result
+  );
+  useEffect(() => {
+    if (!hasPending || loading) return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    }, 60_000);
+    return () => window.clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasPending, loading, selectedGame]);
+
+  const handleTogglePlayed = async (boardId: number) => {
+    try {
+      const updated = await markBoardPlayed(boardId);
+      setBoards((prev) => prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b)));
+    } catch (err: any) {
+      setError(err.message || 'Failed to toggle played status');
+    }
+  };
+
   const handleRunEvaluation = async () => {
     setEvaluating(true);
     try {
@@ -107,7 +147,7 @@ export const ResultsView: React.FC = () => {
   });
   const lostBoards = boards.filter((b) => b.status === 'LOST');
   const pendingBoards = boards.filter(
-    (b) => b.status === 'PENDING' && (!b.results || b.results.length === 0) && !b.result
+    (b) => (b.status === 'PENDING' || b.status === 'PLAYED') && (!b.results || b.results.length === 0) && !b.result
   );
 
   const evaluatedCount = wonBoards.length + lostBoards.length;
@@ -158,7 +198,7 @@ export const ResultsView: React.FC = () => {
     const hasResults = Boolean((b.results && b.results.length > 0) || b.result);
     if (statusFilter === 'WON') return b.status === 'WON' || prize > 0;
     if (statusFilter === 'LOST') return b.status === 'LOST' || (hasResults && prize === 0);
-    if (statusFilter === 'PENDING') return b.status === 'PENDING' && !hasResults;
+    if (statusFilter === 'PENDING') return (b.status === 'PENDING' || b.status === 'PLAYED') && !hasResults;
     return true;
   });
 
@@ -463,6 +503,9 @@ export const ResultsView: React.FC = () => {
                     <span className="text-xs text-zinc-500">Draw: {formatDate(board.target_draw_date)}</span>
                     <span className="text-xs text-zinc-500 font-mono">
                       Conf: {board.confidence_score.toFixed(1)}%
+                      {typeof board.ev_score === 'number' && ` · EV: ${board.ev_score.toFixed(0)}/100`}
+                      {typeof board.simulated_hit_rate === 'number' &&
+                        ` · MC: ${(board.simulated_hit_rate * 100).toFixed(1)}%`}
                     </span>
                   </div>
 
@@ -472,7 +515,29 @@ export const ResultsView: React.FC = () => {
                     ) : isEvaluated ? (
                       <span className="badge badge-neutral">No prize</span>
                     ) : (
-                      <span className="badge badge-warning">Awaiting draw</span>
+                      <>
+                        <span className="badge badge-warning">Awaiting draw</span>
+                        <DrawCountdownBadge targetDate={board.target_draw_date} />
+                      </>
+                    )}
+
+                    {!isEvaluated && !isWinner && (
+                      <button
+                        onClick={() => handleTogglePlayed(board.id)}
+                        className={`btn btn-sm ${board.status === 'PLAYED' ? 'btn-ghost text-emerald-300' : 'btn-ghost text-zinc-400'}`}
+                        title={
+                          board.status === 'PLAYED'
+                            ? 'Marked as played on the official platform — click to undo'
+                            : 'Directive 10: mark as manually played on the official lottery platform'
+                        }
+                      >
+                        {board.status === 'PLAYED' ? (
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        ) : (
+                          <Circle className="h-3.5 w-3.5" />
+                        )}
+                        <span className="text-2xs">{board.status === 'PLAYED' ? 'Played' : 'Mark played'}</span>
+                      </button>
                     )}
 
                     <CopyButton text={boardToText(board)} />

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { MonthlyBudget, CircuitBreakerStatus, BoardWithResult, fetchGeneratedBoards } from '../services/api';
+import { MonthlyBudget, CircuitBreakerStatus, BoardWithResult, fetchGeneratedBoards, markBoardPlayed } from '../services/api';
 import type { Tab } from '../App';
 import { BudgetTracker } from './BudgetTracker';
 import { PageHeader, EmptyState } from './ui';
 import { BallRow } from './Ball';
 import { GAMES, formatDate, formatZAR, gameLabel, isPowerBallGame, nextDrawDate, relativeDay } from '../utils/format';
-import { ArrowRight, CalendarDays, Sparkles, Ticket } from 'lucide-react';
+import { useDrawCountdown } from '../utils/useCountdown';
+import { ArrowRight, CalendarDays, CheckCircle2, Circle, Hourglass, Sparkles, Ticket } from 'lucide-react';
 
 interface OverviewProps {
   budget: MonthlyBudget | null;
@@ -54,6 +55,15 @@ export const Overview: React.FC<OverviewProps> = ({ budget, circuitBreaker, load
       .catch(() => setBoards([]))
       .finally(() => setBoardsLoading(false));
   }, []);
+
+  const handleTogglePlayed = async (boardId: number) => {
+    try {
+      const updated = await markBoardPlayed(boardId);
+      setBoards((prev) => prev.map((b) => (b.id === updated.id ? { ...b, ...updated } : b)));
+    } catch {
+      /* non-fatal: badge stays as-is */
+    }
+  };
 
   const upcoming = GAMES.map((g) => ({ ...g, next: nextDrawDate(g.id) })).sort((a, b) =>
     a.next.localeCompare(b.next),
@@ -161,41 +171,78 @@ export const Overview: React.FC<OverviewProps> = ({ budget, circuitBreaker, load
             />
           ) : (
             <ul className="divide-y divide-line/60">
-              {boards.map((b) => {
-                const matched = new Set(b.result?.matched_numbers ?? []);
-                return (
-                  <li key={b.id} className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between hover:bg-surface-3/30 transition-colors">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`badge border text-xs px-2 py-0.5 ${getGameTagStyle(b.game_type)}`}>
-                          {gameLabel(b.game_type)}
-                        </span>
-                        <span className="text-xs text-zinc-500">{formatDate(b.target_draw_date)}</span>
-                      </div>
-                      <div className="mt-2">
-                        <BallRow
-                          numbers={b.numbers}
-                          extra={b.bonus_or_powerball}
-                          powerBall={isPowerBallGame(b.game_type)}
-                          matched={matched}
-                          extraMatched={b.result?.matched_bonus}
-                          size="sm"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-1.5">
-                      <OutcomeBadge board={b} />
-                      {b.result && (
-                        <span className="num text-xs text-zinc-400">{formatZAR(b.result.prize_amount)}</span>
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
+              {boards.map((b) => (
+                <RecentBoardRow key={b.id} board={b} onTogglePlayed={handleTogglePlayed} />
+              ))}
             </ul>
           )}
         </section>
       </div>
     </div>
+  );
+};
+
+const RecentBoardRow: React.FC<{
+  board: BoardWithResult;
+  onTogglePlayed: (boardId: number) => void;
+}> = ({ board, onTogglePlayed }) => {
+  const matched = new Set(board.result?.matched_numbers ?? []);
+  const outcome = boardOutcome(board);
+  const countdown = useDrawCountdown(outcome === 'pending' ? board.target_draw_date : null);
+  const isPlayed = board.status === 'PLAYED';
+
+  return (
+    <li className="flex flex-col gap-3 px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between hover:bg-surface-3/30 transition-colors">
+      <div className="min-w-0">
+        <div className="flex items-center gap-2">
+          <span className={`badge border text-xs px-2 py-0.5 ${getGameTagStyle(board.game_type)}`}>
+            {gameLabel(board.game_type)}
+          </span>
+          <span className="text-xs text-zinc-500">{formatDate(board.target_draw_date)}</span>
+          {outcome === 'pending' && countdown && (
+            <span
+              className="badge badge-warning gap-1"
+              title="Time until this draw closes (~21:00 SAST)"
+            >
+              <Hourglass className="h-3 w-3" />
+              <span className="num">{countdown}</span>
+            </span>
+          )}
+        </div>
+        <div className="mt-2">
+          <BallRow
+            numbers={board.numbers}
+            extra={board.bonus_or_powerball}
+            powerBall={isPowerBallGame(board.game_type)}
+            matched={matched}
+            extraMatched={board.result?.matched_bonus}
+            size="sm"
+          />
+        </div>
+      </div>
+      <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-1.5">
+        <div className="flex items-center gap-2">
+          <OutcomeBadge board={board} />
+          {outcome === 'pending' && (
+            <button
+              onClick={() => onTogglePlayed(board.id)}
+              className={`btn btn-sm ${isPlayed ? 'btn-ghost text-emerald-300' : 'btn-ghost text-zinc-400'}`}
+              title={
+                isPlayed
+                  ? `Played on the official platform${board.played_at ? ` · ${new Date(board.played_at).toLocaleString()}` : ''} — click to undo`
+                  : 'Directive 10: mark as manually played on the official lottery platform'
+              }
+              aria-label={isPlayed ? 'Mark board as not played' : 'Mark board as played'}
+            >
+              {isPlayed ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+              <span className="text-2xs">{isPlayed ? 'Played' : 'Mark played'}</span>
+            </button>
+          )}
+        </div>
+        {board.result && (
+          <span className="num text-xs text-zinc-400">{formatZAR(board.result.prize_amount)}</span>
+        )}
+      </div>
+    </li>
   );
 };

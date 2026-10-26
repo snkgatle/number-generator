@@ -341,6 +341,17 @@ class AIService:
                 game_type=game_type,
                 iterations=10000,
             )
+            # Attach results so callers can persist simulated_hit_rate per board
+            validated_response.monte_carlo = [
+                {
+                    "numbers": mc.numbers,
+                    "simulated_hit_rate": mc.simulated_hit_rate,
+                    "match_3_or_more_rate": mc.match_3_or_more_rate,
+                    "match_4_or_more_rate": mc.match_4_or_more_rate,
+                    "iterations": mc.iterations,
+                }
+                for mc in mc_results
+            ]
             for idx, (b, mc) in enumerate(zip(validated_response.boards, mc_results)):
                 logger.info(
                     f"Board #{idx + 1} Monte Carlo Stress Test: simulated hit rate = {mc.simulated_hit_rate * 100:.2f}% "

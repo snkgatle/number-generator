@@ -2,7 +2,7 @@
 import re
 from datetime import date, datetime
 from decimal import Decimal
-from typing import List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.schemas.enums import (
     BoardStatus,
@@ -30,6 +30,22 @@ class GeneratedBoardBase(BaseModel):
     ai_reasoning: Optional[str] = Field(None, description="Analytical reasoning provided by AI")
     status: BoardStatus = Field(default=BoardStatus.PENDING, description="Board lifecycle status")
     cost: Decimal = Field(default=Decimal("10.00"), ge=0, description="Cost of the bundled board in ZAR (R10.00)")
+    simulated_hit_rate: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=1.0,
+        description="Directive 15: Monte Carlo simulated hit rate (0.0-1.0)",
+    )
+    ev_score: Optional[float] = Field(
+        None,
+        ge=0.0,
+        le=100.0,
+        description="Directive 20: Expected Value score (0-100) penalizing human bias",
+    )
+    played_at: Optional[datetime] = Field(
+        None,
+        description="Directive 10: timestamp when the user manually played this board",
+    )
 
     @field_validator("numbers")
     @classmethod
@@ -149,6 +165,10 @@ class AIGenerationResponse(BaseModel):
     pool: Optional[List[int]] = Field(
         default=None,
         description="Directive 18: High-confidence candidate pool (10-14 numbers) for combinatorial wheeling",
+    )
+    monte_carlo: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="Directive 15: Monte Carlo stress test results aligned by board index (populated locally, never by the LLM)",
     )
 
     def validate_against_game_rules(self) -> None:

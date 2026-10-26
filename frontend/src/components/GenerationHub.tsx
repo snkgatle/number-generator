@@ -315,6 +315,22 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
                         <span className="num">{board.confidence_score.toFixed(1)}%</span> confidence
                         {isHighConfidence && <span>· Bonus</span>}
                       </span>
+                      {typeof board.ev_score === 'number' && (
+                        <span
+                          className={`badge ${board.ev_score >= 80 ? 'badge-success' : board.ev_score >= 50 ? 'badge-neutral' : 'badge-warning'}`}
+                          title="Directive 20: Expected Value score — penalizes human-biased combinations (all ≤31, sequences)"
+                        >
+                          <span className="num">EV {board.ev_score.toFixed(0)}</span>/100
+                        </span>
+                      )}
+                      {typeof board.simulated_hit_rate === 'number' && (
+                        <span
+                          className="badge badge-neutral"
+                          title="Directive 15: Monte Carlo hit rate across 10,000 weighted simulations"
+                        >
+                          <span className="num">MC {(board.simulated_hit_rate * 100).toFixed(1)}%</span>
+                        </span>
+                      )}
                       <CopyButton text={textToCopy} label="Copy board" />
                     </div>
                   </div>

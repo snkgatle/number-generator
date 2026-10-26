@@ -1,4 +1,4 @@
-import { useState, useEffect, type ElementType } from 'react';
+import { useState, useEffect, lazy, Suspense, type ElementType } from 'react';
 import {
   fetchHealth,
   fetchCurrentBudget,
@@ -11,11 +11,17 @@ import {
 } from './services/api';
 import { Overview } from './components/Overview';
 import { GenerationHub } from './components/GenerationHub';
-import { ResultsView } from './components/ResultsView';
-import { StatsExplorer } from './components/StatsExplorer';
 import { LoginView } from './components/LoginView';
 import { formatZAR } from './utils/format';
 import { LayoutGrid, Sparkles, Trophy, BarChart3, Menu, X, RotateCw, LogOut, ShieldCheck } from 'lucide-react';
+
+// Route-level code splitting: recharts is only needed on these two routes
+const ResultsView = lazy(() =>
+  import('./components/ResultsView').then((m) => ({ default: m.ResultsView }))
+);
+const StatsExplorer = lazy(() =>
+  import('./components/StatsExplorer').then((m) => ({ default: m.StatsExplorer }))
+);
 
 export type Tab = 'overview' | 'generate' | 'results' | 'stats';
 
@@ -270,8 +276,30 @@ export default function App() {
         {activeTab === 'generate' && (
           <GenerationHub circuitBreaker={circuitBreaker} onBoardGenerated={loadSystemState} />
         )}
-        {activeTab === 'results' && <ResultsView />}
-        {activeTab === 'stats' && <StatsExplorer />}
+        {activeTab === 'results' && (
+          <Suspense
+            fallback={
+              <div className="card card-body">
+                <div className="skeleton h-8 w-64 mb-4" />
+                <div className="skeleton h-24" />
+              </div>
+            }
+          >
+            <ResultsView />
+          </Suspense>
+        )}
+        {activeTab === 'stats' && (
+          <Suspense
+            fallback={
+              <div className="card card-body">
+                <div className="skeleton h-8 w-64 mb-4" />
+                <div className="skeleton h-24" />
+              </div>
+            }
+          >
+            <StatsExplorer />
+          </Suspense>
+        )}
       </main>
 
       {/* Footer */}

@@ -125,6 +125,9 @@ export interface GeneratedBoard {
   ai_reasoning?: string | null;
   status: string;
   cost: number;
+  simulated_hit_rate?: number | null;
+  ev_score?: number | null;
+  played_at?: string | null;
   created_at: string;
   results?: BoardResult[];
   result?: BoardResult | null;
@@ -329,6 +332,17 @@ export async function fetchBoardById(boardId: number): Promise<BoardWithResult> 
   const response = await apiFetch(`${API_BASE_URL}/generator/boards/${boardId}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch board details: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function markBoardPlayed(boardId: number): Promise<BoardWithResult> {
+  const response = await apiFetch(`${API_BASE_URL}/generator/boards/${boardId}/played`, {
+    method: 'PATCH',
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to toggle played status');
   }
   return response.json();
 }

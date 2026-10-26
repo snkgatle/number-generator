@@ -93,6 +93,44 @@ async def test_generator_trigger(client):
         data = response.json()
         assert len(data) == 1
         assert data[0]["bundle_name"] == "LOTTO_FAMILY"
+        # Directive 20: EV score must be computed and persisted on creation
+        assert data[0]["ev_score"] is not None
+        assert 0.0 <= data[0]["ev_score"] <= 100.0
+
+
+@pytest.mark.asyncio
+async def test_board_played_toggle(client, db_session):
+    """Directive 10: PATCH /boards/{id}/played toggles PENDING <-> PLAYED with played_at."""
+    from datetime import date
+    from decimal import Decimal
+    from app.models.board import GeneratedBoard
+
+    board = GeneratedBoard(
+        bundle_name="LOTTO_FAMILY",
+        game_type="LOTTO_FAMILY",
+        target_draw_date=date(2026, 10, 28),
+        numbers=[4, 12, 19, 23, 44, 51],
+        confidence_score=85.0,
+        cost=Decimal("10.00"),
+        status="PENDING",
+    )
+    db_session.add(board)
+    await db_session.commit()
+    await db_session.refresh(board)
+
+    # Mark as played
+    res = await client.patch(f"/api/v1/generator/boards/{board.id}/played")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "PLAYED"
+    assert data["played_at"] is not None
+
+    # Toggle back to pending
+    res2 = await client.patch(f"/api/v1/generator/boards/{board.id}/played")
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["status"] == "PENDING"
+    assert data2["played_at"] is None
 
 
 def test_setup_logging():

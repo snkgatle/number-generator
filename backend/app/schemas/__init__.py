@@ -30,6 +30,10 @@ from app.schemas.board import (
     GenerationRequest,
     PostDrawFeedbackResponse,
 )
+from app.schemas.feedback import (
+    FeedbackPerformanceSummary,
+    GenerationFeedbackResponse,
+)
 from app.schemas.stats import (
     NumberFrequency,
     NumberDelay,
@@ -75,6 +79,8 @@ __all__ = [
     "AIGenerationResponse",
     "GenerationRequest",
     "PostDrawFeedbackResponse",
+    "GenerationFeedbackResponse",
+    "FeedbackPerformanceSummary",
     "NumberFrequency",
     "NumberDelay",
     "ConsecutivePair",

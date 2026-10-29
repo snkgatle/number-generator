@@ -64,6 +64,24 @@ class Settings(BaseSettings):
         description="Day of month when budget cycle initializes (default 25th)",
     )
 
+    # Performance Feedback / Outcome Calibration
+    FEEDBACK_WINDOW_SIZE: int = Field(
+        default=10,
+        description="Number of most recent evaluated draws in the rolling feedback window",
+    )
+    FEEDBACK_MIN_SAMPLES: int = Field(
+        default=8,
+        description="Minimum complete feedback records before outcome calibration is considered sufficient",
+    )
+    FEEDBACK_PROMPT_ENABLED: bool = Field(
+        default=True,
+        description="Inject realized-outcome calibration into future Qwen generation prompts",
+    )
+    FEEDBACK_ALLOCATION_ENABLED: bool = Field(
+        default=False,
+        description="Allow realized positive ROI to grant at most one additional board (opt-in)",
+    )
+
     # Alerts & Notifications (Phase 5.5)
     TELEGRAM_BOT_TOKEN: Optional[str] = Field(
         default=None,

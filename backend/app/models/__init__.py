@@ -5,6 +5,7 @@ from app.models.draw import Draw
 from app.models.budget import MonthlyBudget
 from app.models.board import GeneratedBoard, BoardResult
 from app.models.analytics import TemporalAnalytics
+from app.models.feedback import GenerationFeedback
 
 __all__ = [
     "Base",
@@ -14,4 +15,5 @@ __all__ = [
     "GeneratedBoard",
     "BoardResult",
     "TemporalAnalytics",
+    "GenerationFeedback",
 ]

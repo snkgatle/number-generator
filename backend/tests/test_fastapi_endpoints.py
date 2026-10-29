@@ -228,3 +228,146 @@ async def test_global_exception_handler_cors():
 
 
 
+
+
+@pytest.mark.asyncio
+async def test_feedback_performance_endpoint(client, db_session):
+    """The rolling performance endpoint exposes persisted realized-outcome aggregates."""
+    from datetime import date
+    from decimal import Decimal
+    from app.models.board import BoardResult, GeneratedBoard
+    from app.models.draw import Draw
+    from app.schemas.board import PostDrawFeedbackResponse
+    from app.schemas.enums import GameType
+    from app.services.feedback_service import FeedbackService
+
+    draw = Draw(
+        draw_number=9001,
+        game_type="LOTTO",
+        draw_date=date(2026, 10, 21),
+        numbers=[1, 2, 3, 4, 5, 6],
+        bonus_ball=7,
+    )
+    board = GeneratedBoard(
+        bundle_name="LOTTO_FAMILY",
+        game_type="LOTTO_FAMILY",
+        target_draw_date=date(2026, 10, 21),
+        numbers=[1, 2, 3, 4, 5, 8],
+        confidence_score=80.0,
+        ai_reasoning="Endpoint feedback test board.",
+        status="WON",
+        cost=Decimal("10.00"),
+    )
+    db_session.add_all([draw, board])
+    await db_session.commit()
+    await db_session.refresh(draw)
+    await db_session.refresh(board)
+
+    result = BoardResult(
+        board_id=board.id,
+        draw_id=draw.id,
+        game_type="LOTTO",
+        matched_numbers=[1, 2, 3, 4, 5],
+        matched_count=5,
+        matched_bonus=False,
+        division="Division 3",
+        prize_amount=Decimal("100.00"),
+    )
+    db_session.add(result)
+    await db_session.commit()
+
+    await FeedbackService().record_feedback(
+        db_session,
+        draw=draw,
+        bundle_name="LOTTO_FAMILY",
+        boards=[board],
+        results=[result],
+        feedback=PostDrawFeedbackResponse(
+            game_type=GameType.LOTTO,
+            draw_date="2026-10-21",
+            accuracy_rate=0.5,
+            divergence_analysis="Test divergence.",
+            calibration_recommendations=["Spread numbers higher."],
+        ),
+        source="manual",
+    )
+
+    res = await client.get(
+        "/api/v1/generator/feedback/performance?bundle_name=LOTTO_FAMILY"
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["sample_count"] == 1
+    assert float(data["total_winnings"]) == 100.0
+    assert data["recent_recommendations"] == ["Spread numbers higher."]
+
+
+@pytest.mark.asyncio
+async def test_manual_feedback_endpoint_aggregates_bundle(client, db_session):
+    """POST /generator/feedback/{draw_id} writes ONE bundle-date feedback row,
+    charging cost once and summing all sub-draw winnings."""
+    from datetime import date
+    from decimal import Decimal
+    from unittest.mock import patch
+    from sqlalchemy import select
+    from app.models.board import BoardResult, GeneratedBoard
+    from app.models.draw import Draw
+    from app.models.feedback import GenerationFeedback
+    from app.schemas.board import PostDrawFeedbackResponse
+    from app.schemas.enums import GameType
+
+    draw_date = date(2026, 11, 21)  # a Saturday
+    board = GeneratedBoard(
+        bundle_name="LOTTO_FAMILY", game_type="LOTTO_FAMILY",
+        target_draw_date=draw_date, numbers=[3, 7, 15, 22, 40, 50],
+        confidence_score=80.0, ai_reasoning="Manual aggregate board.",
+        status="WON", cost=Decimal("10.00"),
+    )
+    draws = [
+        Draw(draw_number=7001, game_type="LOTTO", draw_date=draw_date,
+             numbers=[3, 7, 15, 22, 38, 49], bonus_ball=11),
+        Draw(draw_number=7002, game_type="LOTTO_PLUS_1", draw_date=draw_date,
+             numbers=[3, 7, 15, 22, 40, 50], bonus_ball=1),
+        Draw(draw_number=7003, game_type="LOTTO_PLUS_2", draw_date=draw_date,
+             numbers=[1, 2, 3, 4, 5, 6], bonus_ball=7),
+    ]
+    db_session.add(board)
+    db_session.add_all(draws)
+    await db_session.commit()
+    for d in draws:
+        await db_session.refresh(d)
+    await db_session.refresh(board)
+
+    # Pre-seed sub-draw results so winnings live across multiple draws.
+    db_session.add(BoardResult(
+        board_id=board.id, draw_id=draws[1].id, game_type="LOTTO_PLUS_1",
+        matched_numbers=[3, 7, 15, 22, 40, 50], matched_count=6,
+        matched_bonus=True, division="Division 1", prize_amount=Decimal("5000.00"),
+    ))
+    await db_session.commit()
+
+    mock_fb = PostDrawFeedbackResponse(
+        game_type=GameType.LOTTO, draw_date=draw_date.isoformat(),
+        accuracy_rate=0.5, divergence_analysis="Manual review.",
+        calibration_recommendations=["Test directive."],
+    )
+
+    with patch(
+        "app.api.v1.generator.ai_service.analyze_draw_performance",
+        return_value=mock_fb,
+    ):
+        res = await client.post(f"/api/v1/generator/feedback/{draws[1].id}")
+    assert res.status_code == 200
+
+    rows = (
+        await db_session.execute(
+            select(GenerationFeedback).where(
+                GenerationFeedback.bundle_name == "LOTTO_FAMILY"
+            )
+        )
+    ).scalars().all()
+    # A secondary sub-draw (PLUS_1) request still resolves to the primary LOTTO draw key.
+    assert len(rows) == 1
+    assert rows[0].draw_id == draws[0].id
+    assert rows[0].total_cost == Decimal("10.00")
+    assert rows[0].total_winnings == Decimal("5000.00")

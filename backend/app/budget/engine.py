@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.budget import MonthlyBudget
+from app.schemas.feedback import FeedbackPerformanceSummary
 from app.schemas.budget import (
     AllocationPlanResponse,
     BoardAllocationRecommendation,
@@ -204,6 +205,7 @@ class BudgetEngine:
         game_type: Union[GameType, BundleType, str],
         target_date: Optional[date] = None,
         confidence_score: Optional[float] = None,
+        performance_summary: Optional[FeedbackPerformanceSummary] = None,
     ) -> BoardAllocationRecommendation:
         """Computes board allocation for a draw based on statistical confidence and monthly quota.
 
@@ -248,7 +250,27 @@ class BudgetEngine:
                     f"Confidence score ({confidence_score:.1f}%) below {self.CONFIDENCE_BONUS_THRESHOLD}% threshold; standard 1 board allocated."
                 )
 
-        candidate_total = base_boards + bonus_boards
+        # Realized-ROI performance bonus (opt-in, never based on AI-claimed accuracy).
+        performance_bonus = 0
+        if (
+            settings.FEEDBACK_ALLOCATION_ENABLED
+            and performance_summary is not None
+            and performance_summary.has_sufficient_data
+            and performance_summary.avg_roi > 0
+        ):
+            draws_info = self.calculate_remaining_draws_in_month(draw_date)
+            if budget.remaining_boards > draws_info["total_draws_remaining"]:
+                performance_bonus = 1
+                reasoning_parts.append(
+                    f"Realized ROI bonus: {performance_summary.avg_roi:+.2f}% across "
+                    f"{performance_summary.sample_count} evaluations qualified for +1 board."
+                )
+            else:
+                reasoning_parts.append(
+                    "Positive realized ROI, but no surplus quota for a performance bonus board."
+                )
+
+        candidate_total = base_boards + bonus_boards + performance_bonus
         total_allocated = min(candidate_total, budget.remaining_boards)
 
         if total_allocated < candidate_total:

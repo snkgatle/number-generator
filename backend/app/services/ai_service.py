@@ -175,6 +175,7 @@ class AIService:
         temporal_bias: Optional[Dict[str, Any]] = None,
         environmental_anomalies: Optional[str] = None,
         historical_draws: Optional[List[Draw]] = None,
+        feedback_context: Optional[str] = None,
         fallback_on_error: bool = True,
     ) -> AIGenerationResponse:
         """Prompts Qwen-Max using isolated templates and validates output with Pydantic.
@@ -248,6 +249,7 @@ class AIService:
             bundle_intersection_context=bundle_inter_ctx,
             advanced_math_context=adv_math,
             temporal_bias_context=temporal_bias_context,
+            feedback_context=feedback_context or "",
             environmental_anomalies_context=env_context,
         )
 

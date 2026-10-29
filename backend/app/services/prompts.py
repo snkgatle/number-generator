@@ -21,6 +21,7 @@ Rules:
 7. Avoid recommending arithmetic sequences (e.g., 5, 10, 15, 20) or purely calendar-based clusters (all <= 31).
 8. Output a primary "pool" of 10-12 high-confidence numbers. Ensure the pool contains a balanced mix of positional candidates (low, mid, high).
 9. Directive 21 & 22: For Game Bundles (LOTTO_FAMILY or POWERBALL_FAMILY), one generated board applies to ALL sub-draws simultaneously. Seek the statistical intersection across all sub-draws to maximize aggregate ROI across the entire bundle.
+10. Realized-outcome calibration is a soft diagnostic signal only. Draws are independent; do not infer causal patterns from small samples and never claim guaranteed prediction. Use it to adjust statistical weighting, spread, parity assumptions, or EV strategy.
 """
 
 PRIMARY_GENERATION_USER_PROMPT = """Game: {game_type}
@@ -34,7 +35,7 @@ Historical Statistical Context (Last 50 Draws):
 - Most Frequent Odd/Even Ratio: {odd_even_ratio}
 - Recurring Consecutive Pairs: {consecutive_pairs}
 - Most Overdue Numbers: {overdue_numbers}{bundle_intersection_context}{advanced_math_context}
-{temporal_bias_context}{environmental_anomalies_context}
+{temporal_bias_context}{feedback_context}{environmental_anomalies_context}
 Instructions:
 Generate exactly {allocated_boards} boards adhering to the {game_type} rules, and provide a 10-12 number candidate pool for combinatorial wheeling.
 If analyzing a bundle, find the statistical intersection across sub-draws to maximize aggregate performance.
@@ -52,6 +53,17 @@ Return a valid JSON object matching this schema:
   ],
   "statistical_analysis_summary": "Comprehensive analysis summary explaining the selection strategy..."
 }}
+"""
+
+PERFORMANCE_FEEDBACK_CONTEXT_PROMPT = """
+Realized Outcome Calibration (last {sample_count} complete evaluations, {window_start} to {window_end}):
+- Average Qwen-reported alignment rate: {avg_accuracy:.1%}
+- Average realized ROI: {avg_roi:+.2f}%
+- Total cost: R{total_cost:.2f} | Winnings: R{total_winnings:.2f} | Net: R{net_profit:+.2f}
+- Latest evaluation alignment: {latest_accuracy} | Latest realized ROI: {latest_roi}
+- Recent calibration directives from post-draw reviews:
+{recommendations_block}
+Treat these as a soft calibration signal. Lottery draws remain independent; avoid overfitting to small samples.
 """
 
 POST_DRAW_FEEDBACK_SYSTEM_PROMPT = """You are a post-draw statistical reviewer analyzing performance deviations between predicted lottery boards and official draw outcomes.

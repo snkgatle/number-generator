@@ -3,6 +3,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,11 +20,13 @@ from app.schemas.board import (
     PostDrawFeedbackResponse,
     PreDrawPipelineRequest,
 )
-from app.schemas.enums import BundleType, GameType, GAME_TO_BUNDLE, get_next_draw_date
+from app.schemas.enums import BundleType, GameType, GAME_TO_BUNDLE, BUNDLE_GAMES, get_next_draw_date
+from app.schemas.feedback import FeedbackPerformanceSummary, GenerationFeedbackResponse
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
 from app.services.budget_service import BudgetExhaustedException, BudgetService
 from app.services.dedup_service import DedupService
+from app.services.feedback_service import FeedbackService
 from app.services.notifier import Notifier
 from app.services.stats_service import StatsService
 
@@ -33,6 +36,7 @@ stats_service = StatsService()
 budget_service = BudgetService()
 analytics_service = TemporalAnalyticsService(ai_service)
 dedup_service = DedupService()
+feedback_service = FeedbackService()
 notifier = Notifier()
 
 
@@ -179,6 +183,12 @@ async def generate_boards(
     # Directive 11: Fetch actionable temporal bias
     temporal_bias = await analytics_service.get_latest_actionable_bias(db, bundle_type)
 
+    # Realized-outcome calibration from complete prior evaluations (aggregate only)
+    feedback_summary = await feedback_service.get_performance_summary(
+        db, bundle_type.value
+    )
+    feedback_context = feedback_service.format_prompt_context(feedback_summary)
+
     # Phase 4: Qwen-Max Generation with Strict JSON Enforcement & Monte Carlo Stress Testing (Directive 15)
     try:
         ai_response = await ai_service.generate_boards(
@@ -189,6 +199,7 @@ async def generate_boards(
             temporal_bias=temporal_bias,
             environmental_anomalies=env_anomalies,
             historical_draws=recent_draws,
+            feedback_context=feedback_context,
         )
     except AIServiceError as err:
         raise HTTPException(
@@ -252,6 +263,29 @@ async def generate_boards(
     return created_boards
 
 
+@router.get("/feedback", response_model=List[GenerationFeedbackResponse])
+async def list_performance_feedback(
+    bundle_name: Optional[BundleType] = Query(None, description="Filter by game bundle"),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve persisted post-draw performance feedback, newest first."""
+    return await feedback_service.get_recent_feedback(
+        db,
+        bundle_name=bundle_name.value if bundle_name else None,
+        limit=limit,
+    )
+
+
+@router.get("/feedback/performance", response_model=FeedbackPerformanceSummary)
+async def get_performance_summary(
+    bundle_name: BundleType = Query(..., description="Bundle to summarize"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the rolling realized-outcome summary used for future calibration."""
+    return await feedback_service.get_performance_summary(db, bundle_name.value)
+
+
 @router.post("/feedback/{draw_id}", response_model=PostDrawFeedbackResponse)
 async def post_draw_feedback(
     draw_id: int,
@@ -267,19 +301,64 @@ async def post_draw_feedback(
             detail=f"Draw #{draw_id} not found.",
         )
 
-    # 2. Fetch associated boards and results
-    boards_res = await db.execute(
-        select(GeneratedBoard).where(GeneratedBoard.draw_id == draw_id)
+    # 2. Resolve the parent bundle so this review aggregates every sub-draw on
+    #    the same night (Directive 24), matching the batch pipeline's keying.
+    try:
+        bundle_type = GAME_TO_BUNDLE.get(GameType(draw.game_type))
+    except ValueError:
+        bundle_type = None
+    if bundle_type is None:
+        bundle_type = BundleType.LOTTO_FAMILY
+
+    member_games = [g.value for g in BUNDLE_GAMES.get(bundle_type, [])]
+    siblings_res = await db.execute(
+        select(Draw).where(
+            Draw.game_type.in_(member_games),
+            Draw.draw_date == draw.draw_date,
+        )
     )
-    boards = list(boards_res.scalars().all())
+    sibling_draws = list(siblings_res.scalars().all()) or [draw]
+    sibling_ids = {d.id for d in sibling_draws}
+
+    # Representative draw = the bundle's primary sub-draw (stable feedback key).
+    primary_game = BUNDLE_GAMES[bundle_type][0].value if member_games else draw.game_type
+    representative = next(
+        (d for d in sibling_draws if d.game_type == primary_game),
+        min(sibling_draws, key=lambda d: d.draw_number),
+    )
 
     results_res = await db.execute(
-        select(BoardResult).where(BoardResult.draw_id == draw_id)
+        select(BoardResult).where(BoardResult.draw_id.in_(sibling_ids))
     )
     results = list(results_res.scalars().all())
 
+    board_ids = {r.board_id for r in results}
+    boards: List[GeneratedBoard] = []
+    if board_ids:
+        boards_res = await db.execute(
+            select(GeneratedBoard).where(GeneratedBoard.id.in_(board_ids))
+        )
+        boards = list(boards_res.scalars().all())
+
     try:
-        feedback = await ai_service.analyze_draw_performance(draw, boards, results)
+        feedback = await ai_service.analyze_draw_performance(representative, boards, results)
+
+        if boards:
+            try:
+                await feedback_service.record_feedback(
+                    db,
+                    draw=representative,
+                    bundle_name=bundle_type.value,
+                    boards=boards,
+                    results=results,
+                    feedback=feedback,
+                    source="manual",
+                )
+            except Exception as persist_err:
+                logger.error(
+                    f"Failed to persist manual feedback for draw #{draw_id}: {persist_err}"
+                )
+
         return feedback
     except AIServiceError as err:
         raise HTTPException(

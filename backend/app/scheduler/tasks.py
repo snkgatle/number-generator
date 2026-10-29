@@ -27,7 +27,10 @@ async def scheduled_post_draw_task():
     logger.info("APScheduler Trigger: Running scheduled Post-Draw automation...")
     try:
         result = await pipeline_orchestrator.execute_post_draw_pipeline()
-        logger.info(f"APScheduler Post-Draw completed: {result.get('evaluated_boards_count')} boards evaluated.")
+        logger.info(
+            f"APScheduler Post-Draw completed: {result.get('evaluated_boards_count')} "
+            f"boards across {result.get('evaluated_sub_results')} sub-draw results."
+        )
     except Exception as exc:
         logger.error(f"Error in scheduled Post-Draw task: {exc}", exc_info=True)
 

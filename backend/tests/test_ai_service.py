@@ -325,3 +325,36 @@ async def test_generate_boards_accepts_str_game_type_with_historical_draws():
 
         assert len(response.boards) >= 1
         assert response.game_type == "LOTTO_FAMILY"
+
+
+@pytest.mark.asyncio
+async def test_generate_boards_injects_realized_feedback_context(ai_service):
+    """Realized-outcome calibration must reach the Qwen user prompt."""
+    mock_payload = {
+        "game_type": "LOTTO",
+        "boards": [
+            {
+                "numbers": [4, 12, 19, 23, 44, 51],
+                "bonus_or_powerball": None,
+                "confidence_score": 87.5,
+                "reasoning": "Balanced historical distribution with high EV.",
+            }
+        ],
+        "statistical_analysis_summary": "Summary",
+    }
+    captured = {}
+
+    async def fake_call(messages, **kwargs):
+        captured["messages"] = messages
+        return mock_payload
+
+    with patch.object(ai_service, "call_qwen_json", side_effect=fake_call):
+        await ai_service.generate_boards(
+            game_type=GameType.LOTTO,
+            target_draw_date=date(2026, 10, 21),
+            allocated_boards=1,
+            stats_context={},
+            feedback_context="Realized Outcome Calibration (last 8 evaluations): avg ROI -42%",
+        )
+
+    assert "Realized Outcome Calibration" in captured["messages"][1]["content"]

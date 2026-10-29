@@ -83,7 +83,7 @@ async def test_post_draw_pipeline_evaluation(orchestrator, db_session):
     """Verify Post-Draw evaluation matches winning numbers and updates board status."""
     draw_date = date(2026, 10, 17)
 
-    # 1. Seed Draw in DB
+    # 1. Seed all bundle sub-draws so the board can be finalized
     draw = Draw(
         draw_number=2710,
         game_type="LOTTO",
@@ -92,6 +92,16 @@ async def test_post_draw_pipeline_evaluation(orchestrator, db_session):
         bonus_ball=11,
     )
     db_session.add(draw)
+    for idx, game_type in enumerate(["LOTTO_PLUS_1", "LOTTO_PLUS_2"], start=1):
+        db_session.add(
+            Draw(
+                draw_number=2710 + idx,
+                game_type=game_type,
+                draw_date=draw_date,
+                numbers=[1, 2, 3, 4, 5, 6],
+                bonus_ball=7,
+            )
+        )
 
     # 2. Seed pending GeneratedBoard in DB matching 4 numbers
     board = GeneratedBoard(
@@ -121,7 +131,10 @@ async def test_post_draw_pipeline_evaluation(orchestrator, db_session):
 
         res = await orchestrator.execute_post_draw_pipeline(db=db_session)
         assert res["status"] == "COMPLETED"
-        assert res["evaluated_boards_count"] >= 1
+        # Honest counters: 1 distinct board, but it matched 3 Lotto-family sub-draws
+        assert res["evaluated_boards_count"] == 1
+        assert res["evaluated_sub_results"] == 3
+        assert res["evaluated_draws_count"] == 3
 
         # Verify board status updated to WON (4 matches >= 3)
         await db_session.refresh(board)
@@ -130,12 +143,25 @@ async def test_post_draw_pipeline_evaluation(orchestrator, db_session):
 
         # Verify BoardResult record created
         from sqlalchemy import select
-        r_query = select(BoardResult).where(BoardResult.board_id == board.id)
+        r_query = select(BoardResult).where(
+            BoardResult.board_id == board.id,
+            BoardResult.game_type == "LOTTO",
+        )
         r_res = await db_session.execute(r_query)
         result_entity = r_res.scalar_one_or_none()
         assert result_entity is not None
         assert result_entity.matched_count == 4
         assert result_entity.matched_numbers == [3, 7, 15, 22]
+
+        # Feedback must be persisted for the bundle
+        from app.models.feedback import GenerationFeedback
+        f_res = await db_session.execute(
+            select(GenerationFeedback).where(GenerationFeedback.draw_id == draw.id)
+        )
+        feedback_entity = f_res.scalar_one_or_none()
+        assert feedback_entity is not None
+        assert feedback_entity.bundle_name == "LOTTO_FAMILY"
+        assert feedback_entity.boards_evaluated == 1
 
 
 @pytest.mark.asyncio
@@ -206,3 +232,171 @@ async def test_post_draw_skips_board_without_matching_draw_date(orchestrator, db
     assert board.status == BoardStatus.PENDING.value, (
         f"Expected PENDING, got {board.status}"
     )
+
+
+@pytest.mark.asyncio
+async def test_post_draw_defers_board_until_bundle_is_complete(orchestrator, db_session):
+    """A board must not be finalized while some bundle sub-draws are missing."""
+    draw_date = date(2026, 10, 24)
+    board = GeneratedBoard(
+        bundle_name="LOTTO_FAMILY",
+        game_type="LOTTO_FAMILY",
+        target_draw_date=draw_date,
+        numbers=[1, 2, 3, 4, 5, 6],
+        confidence_score=85.0,
+        ai_reasoning="Awaiting complete bundle results.",
+        status=BoardStatus.PENDING.value,
+        cost=Decimal("10.00"),
+    )
+    db_session.add_all([
+        Draw(
+            draw_number=4000,
+            game_type="LOTTO",
+            draw_date=draw_date,
+            numbers=[1, 2, 3, 4, 5, 6],
+            bonus_ball=7,
+        ),
+        board,
+    ])
+    await db_session.commit()
+    await db_session.refresh(board)
+
+    with patch.object(orchestrator.scraper_service, "scrape_and_sync_all_games", return_value={"LOTTO": 0}):
+        res = await orchestrator.execute_post_draw_pipeline(db=db_session)
+
+    assert res["evaluated_boards_count"] == 0
+    await db_session.refresh(board)
+    assert board.status == BoardStatus.PENDING.value
+
+
+@pytest.mark.asyncio
+async def test_post_draw_persists_single_aggregated_bundle_feedback(orchestrator, db_session):
+    """Directive 24: a Lotto-family night with 3 sub-draws yields ONE feedback
+    row whose cost is charged once and whose winnings sum every sub-draw."""
+    from app.models.feedback import GenerationFeedback
+    from sqlalchemy import select
+
+    draw_date = date(2026, 11, 18)  # a Wednesday
+    board = GeneratedBoard(
+        bundle_name="LOTTO_FAMILY",
+        game_type="LOTTO_FAMILY",
+        target_draw_date=draw_date,
+        numbers=[3, 7, 15, 22, 40, 50],
+        confidence_score=80.0,
+        ai_reasoning="Aggregation regression board.",
+        status=BoardStatus.PENDING.value,
+        cost=Decimal("10.00"),
+    )
+    db_session.add(board)
+    db_session.add_all([
+        Draw(draw_number=5001, game_type="LOTTO", draw_date=draw_date,
+             numbers=[3, 7, 15, 22, 38, 49], bonus_ball=11),
+        Draw(draw_number=5002, game_type="LOTTO_PLUS_1", draw_date=draw_date,
+             numbers=[3, 7, 15, 22, 40, 50], bonus_ball=1),
+        Draw(draw_number=5003, game_type="LOTTO_PLUS_2", draw_date=draw_date,
+             numbers=[3, 7, 15, 9, 10, 11], bonus_ball=2),
+    ])
+    await db_session.commit()
+    await db_session.refresh(board)
+
+    mock_feedback = PostDrawFeedbackResponse(
+        game_type=GameType.LOTTO,
+        draw_date=draw_date.isoformat(),
+        accuracy_rate=0.5,
+        divergence_analysis="Aggregated review.",
+        calibration_recommendations=["Balance high/low."],
+    )
+
+    with patch.object(orchestrator.scraper_service, "scrape_and_sync_all_games", return_value={"LOTTO": 0}), \
+         patch.object(orchestrator.ai_service, "analyze_draw_performance", return_value=mock_feedback) as mock_analyze:
+        res = await orchestrator.execute_post_draw_pipeline(db=db_session)
+
+    # AI review invoked once per bundle-date, not once per sub-draw
+    assert mock_analyze.call_count == 1
+    assert res["status"] == "COMPLETED"
+    assert res["evaluated_boards_count"] == 1
+    assert res["evaluated_sub_results"] == 3
+    assert res["evaluated_draws_count"] == 3
+
+    feedback_rows = (
+        await db_session.execute(
+            select(GenerationFeedback).where(GenerationFeedback.bundle_name == "LOTTO_FAMILY")
+        )
+    ).scalars().all()
+    assert len(feedback_rows) == 1
+
+    record = feedback_rows[0]
+    assert record.boards_evaluated == 1
+    assert record.total_cost == Decimal("10.00")  # charged once, not 3x
+
+    # winnings equal the sum of all sub-draw BoardResult rows for this board
+    results_rows = (
+        await db_session.execute(
+            select(BoardResult).where(BoardResult.board_id == board.id)
+        )
+    ).scalars().all()
+    expected_winnings = sum((r.prize_amount for r in results_rows), Decimal("0.00"))
+    assert len(results_rows) == 3
+    assert record.total_winnings == expected_winnings
+    assert record.roi_percentage == round(
+        float((expected_winnings - Decimal("10.00")) / Decimal("10.00") * 100), 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_draw_sends_bundle_level_notification(orchestrator, db_session):
+    """Directive 24: notifications are aggregated per bundle-night, not per sub-draw."""
+    from unittest.mock import AsyncMock
+    from sqlalchemy import select
+
+    draw_date = date(2026, 11, 18)  # Wednesday (Lotto family night)
+    board = GeneratedBoard(
+        bundle_name="LOTTO_FAMILY", game_type="LOTTO_FAMILY",
+        target_draw_date=draw_date, numbers=[3, 7, 15, 22, 40, 50],
+        confidence_score=80.0, ai_reasoning="Bundle notification board.",
+        status=BoardStatus.PENDING.value, cost=Decimal("10.00"),
+    )
+    db_session.add(board)
+    db_session.add_all([
+        Draw(draw_number=6001, game_type="LOTTO", draw_date=draw_date,
+             numbers=[3, 7, 15, 22, 38, 49], bonus_ball=11),
+        Draw(draw_number=6002, game_type="LOTTO_PLUS_1", draw_date=draw_date,
+             numbers=[3, 7, 15, 22, 40, 50], bonus_ball=1),
+        Draw(draw_number=6003, game_type="LOTTO_PLUS_2", draw_date=draw_date,
+             numbers=[3, 7, 15, 22, 40, 50], bonus_ball=9),
+    ])
+    await db_session.commit()
+    await db_session.refresh(board)
+
+    mock_feedback = PostDrawFeedbackResponse(
+        game_type=GameType.LOTTO, draw_date=draw_date.isoformat(),
+        accuracy_rate=0.4, divergence_analysis="Bundle-level review.",
+        calibration_recommendations=["Widen spread."],
+    )
+
+    with patch.object(orchestrator.scraper_service, "scrape_and_sync_all_games", return_value={"LOTTO": 0}), \
+         patch.object(orchestrator.ai_service, "analyze_draw_performance", return_value=mock_feedback), \
+         patch.object(orchestrator.notifier, "notify_bundle_completion", new_callable=AsyncMock) as mock_bundle, \
+         patch.object(orchestrator.notifier, "notify_draw_completion", new_callable=AsyncMock) as mock_single, \
+         patch.object(orchestrator.notifier, "notify_high_matches", new_callable=AsyncMock):
+
+        await orchestrator.execute_post_draw_pipeline(db=db_session)
+
+    # Exactly one bundle-level message; no per-sub-draw completion messages
+    assert mock_bundle.call_count == 1
+    assert mock_single.call_count == 0
+
+    kwargs = mock_bundle.call_args.kwargs
+    assert kwargs["bundle_name"] == "LOTTO_FAMILY"
+    # Single board charged once
+    assert kwargs["total_cost"] == Decimal("10.00")
+
+    # Winnings equal the sum of every sub-draw result
+    rows = (
+        await db_session.execute(
+            select(BoardResult).where(BoardResult.board_id == board.id)
+        )
+    ).scalars().all()
+    expected = sum((r.prize_amount for r in rows), Decimal("0.00"))
+    assert kwargs["total_winnings"] == expected
+    assert len(rows) == 3

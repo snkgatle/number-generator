@@ -181,3 +181,57 @@ class Notifier:
         msg = "\n".join(lines)
         title = f"{game_type} Draw #{draw_number} Results"
         await self.broadcast(title, msg)
+
+    async def notify_bundle_completion(
+        self,
+        bundle_name: str,
+        target_date: str,
+        sub_draws: List[Dict[str, Any]],
+        board_evaluations: List[Dict[str, Any]],
+        total_winnings: Decimal,
+        total_cost: Decimal,
+        roi_percentage: float,
+    ) -> None:
+        """Directive 24: one bundle-level report summing every sub-draw's prize
+        against a single board cost (no per-sub-draw ROI fragmentation)."""
+        title = f"{bundle_name} Results ({target_date})"
+        lines = [f"🎰 *{bundle_name} Bundle Results ({target_date})*", ""]
+
+        lines.append("🧾 *Sub-Draw Winning Numbers:*")
+        for sd in sub_draws:
+            game = str(sd.get("game_type", ""))
+            special_label = "PowerBall" if "POWERBALL" in game.upper() else "Bonus"
+            special = sd.get("bonus_or_pb")
+            special_str = f" | {special_label}: `{special}`" if special is not None else ""
+            nums = ", ".join(str(n) for n in sorted(sd.get("numbers", [])))
+            lines.append(f"• {game} #{sd.get('draw_number')}: `[{nums}]`{special_str}")
+        lines.append("")
+
+        if board_evaluations:
+            lines.append("🎯 *Your Generated Boards (bundle total):*")
+            for b in board_evaluations:
+                b_nums = ", ".join(str(n) for n in sorted(b.get("numbers", [])))
+                b_spec = b.get("bonus_or_pb")
+                spec_part = f" + PB `{b_spec}`" if b_spec is not None else ""
+                board_total = b.get("board_total_prize", Decimal("0.00"))
+                lines.append(f"• Board #{b.get('board_id')}: `[{b_nums}]`{spec_part}")
+                for sr in b.get("sub_results", []):
+                    prize = sr.get("prize", Decimal("0.00"))
+                    division = sr.get("division")
+                    if prize and prize > 0:
+                        tail = f" -> 🏆 *R{prize:,.2f}* ({division})"
+                    else:
+                        tail = f" ({division})" if division else ""
+                    lines.append(
+                        f"    - {sr.get('game_type')}: {sr.get('matched_count', 0)} matches{tail}"
+                    )
+                lines.append(f"    • Board total: *R{board_total:,.2f}*")
+
+            lines.append("")
+            lines.append("📊 *Bundle Financial Summary:*")
+            lines.append(f"• Cost: `R{total_cost:,.2f}` | Payout: *R{total_winnings:,.2f}*")
+            lines.append(f"• Net ROI: *{roi_percentage:+.2f}%*")
+        else:
+            lines.append("ℹ️ _No user boards were played for this bundle._")
+
+        await self.broadcast(title, "\n".join(lines))

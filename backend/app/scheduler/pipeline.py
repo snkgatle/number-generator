@@ -19,10 +19,16 @@ from app.core.database import AsyncSessionLocal
 from app.models.board import BoardResult, GeneratedBoard
 from app.models.bundle import GameBundle
 from app.models.draw import Draw
-from app.schemas.enums import BUNDLE_GAMES, BoardStatus, BundleType, GameType
+from app.schemas.enums import (
+    BUNDLE_GAMES,
+    BoardStatus,
+    BundleType,
+    GameType,
+)
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
 from app.services.dedup_service import DedupService
+from app.services.feedback_service import FeedbackService
 from app.services.notifier import Notifier
 from app.services.prize_service import PrizeService
 from app.services.scraper_service import ScraperService
@@ -51,6 +57,7 @@ class PipelineOrchestrator:
         self.analytics_service = TemporalAnalyticsService(self.ai_service)
         self.dedup_service = DedupService()
         self.prize_service = PrizeService()
+        self.feedback_service = FeedbackService()
         self.notifier = Notifier()
 
     @staticmethod
@@ -144,9 +151,20 @@ class PipelineOrchestrator:
             bundle_data = await self.stats_service.get_stats_for_bundle(db, bundle, sample_size=50)
             stats_vars = self.stats_service.format_bundle_prompt_variables(bundle_data)
 
+            # Rolling realized-outcome calibration (aggregate only, never raw draws)
+            feedback_summary = await self.feedback_service.get_performance_summary(
+                db, bundle.value
+            )
+            feedback_context = self.feedback_service.format_prompt_context(
+                feedback_summary
+            )
+
             # Determine board allocation using confidence engine (Phase 1.5: threshold > 90%)
             allocation = await self.budget_engine.calculate_confidence_allocation(
-                db, game_type=bundle.value, target_date=ref_date
+                db,
+                game_type=bundle.value,
+                target_date=ref_date,
+                performance_summary=feedback_summary,
             )
             boards_to_generate = allocation.total_allocated
 
@@ -171,6 +189,7 @@ class PipelineOrchestrator:
                     temporal_bias=temporal_bias,
                     environmental_anomalies=env_anomalies,
                     historical_draws=bundle_data["all_draws"],
+                    feedback_context=feedback_context,
                 )
             except AIServiceError as err:
                 logger.error(f"AI generation failed for {bundle.value}: {err}. Skipping bundle.")
@@ -271,7 +290,10 @@ class PipelineOrchestrator:
 
         # 2. Evaluate pending boards against available draws
         total_evaluated = 0
-        evaluated_draw_ids = set()
+        # Group finalized reviews by (bundle, target_date) so each bundle
+        # night yields ONE aggregated feedback record (Directive 24), not one
+        # per sub-draw. Key -> {"draw_ids": set, "board_ids": set}.
+        evaluated_targets: Dict[Any, Dict[str, set]] = {}
 
         pending_query = (
             select(GeneratedBoard)
@@ -310,6 +332,18 @@ class PipelineOrchestrator:
             if not matching_draws:
                 continue
 
+            # Only finalize a bundle board once every scheduled sub-draw is present.
+            # Otherwise a partial scrape would permanently understate winnings/ROI.
+            expected_games = set(member_games)
+            available_games = {d.game_type for d in matching_draws}
+            if not expected_games.issubset(available_games):
+                missing = sorted(expected_games - available_games)
+                logger.info(
+                    f"Deferring board #{board.id} ({b_name}) evaluation for "
+                    f"{board.target_draw_date}: missing sub-draws {missing}."
+                )
+                continue
+
             # Directive 24: Multi-Draw ROI Evaluation - evaluate board against all sub-draws
             bundle_eval = self.prize_service.evaluate_board_against_bundle_draws(
                 board_numbers=board.numbers,
@@ -327,106 +361,208 @@ class PipelineOrchestrator:
                 sub_eval = bundle_eval.sub_evaluations.get(draw.game_type)
                 if not sub_eval:
                     continue
-                result_entity = BoardResult(
-                    board_id=board.id,
-                    draw_id=draw.id,
-                    game_type=draw.game_type,
-                    matched_numbers=sub_eval.matched_numbers,
-                    matched_count=sub_eval.matched_count,
-                    matched_bonus=sub_eval.matched_bonus,
-                    division=sub_eval.division,
-                    prize_amount=sub_eval.prize_amount,
+                existing_res = await db.execute(
+                    select(BoardResult).where(
+                        BoardResult.board_id == board.id,
+                        BoardResult.draw_id == draw.id,
+                    )
                 )
-                db.add(result_entity)
+                result_entity = existing_res.scalar_one_or_none()
+                if result_entity is None:
+                    result_entity = BoardResult(
+                        board_id=board.id,
+                        draw_id=draw.id,
+                        game_type=draw.game_type,
+                    )
+                    db.add(result_entity)
+                result_entity.matched_numbers = sub_eval.matched_numbers
+                result_entity.matched_count = sub_eval.matched_count
+                result_entity.matched_bonus = sub_eval.matched_bonus
+                result_entity.division = sub_eval.division
+                result_entity.prize_amount = sub_eval.prize_amount
                 total_evaluated += 1
-                evaluated_draw_ids.add(draw.id)
+
+            bucket = evaluated_targets.setdefault(
+                (b_type.value, board.target_draw_date),
+                {"draw_ids": set(), "board_ids": set()},
+            )
+            bucket["board_ids"].add(board.id)
+            bucket["draw_ids"].update(d.id for d in matching_draws)
 
         await db.commit()
 
-        # 3. Broadcast notifications & Trigger Post-Draw AI Feedback Loop
+        # 3. One bundle-level notification + one aggregated feedback record
+        #    per (bundle, draw_date). Directive 24: sum prizes across sub-draws
+        #    against a single board cost so notifications and ROI stay consistent.
         feedback_summaries = {}
-        if evaluated_draw_ids:
-            for draw_id in evaluated_draw_ids:
-                draw = await db.get(Draw, draw_id)
-                if not draw:
+        if evaluated_targets:
+            for (bundle_key, target_date), info in evaluated_targets.items():
+                draw_ids = info["draw_ids"]
+                board_ids = info["board_ids"]
+                if not draw_ids or not board_ids:
                     continue
 
-                r_res = await db.execute(
-                    select(BoardResult).where(BoardResult.draw_id == draw_id)
+                group_results_res = await db.execute(
+                    select(BoardResult).where(
+                        BoardResult.draw_id.in_(draw_ids),
+                        BoardResult.board_id.in_(board_ids),
+                    )
                 )
-                results = list(r_res.scalars().all())
+                group_results = list(group_results_res.scalars().all())
 
+                group_boards_res = await db.execute(
+                    select(GeneratedBoard).where(GeneratedBoard.id.in_(board_ids))
+                )
+                group_boards = list(group_boards_res.scalars().all())
+
+                group_draws = []
+                for did in draw_ids:
+                    d = await db.get(Draw, did)
+                    if d:
+                        group_draws.append(d)
+                if not group_draws or not group_boards:
+                    continue
+
+                primary_game = BUNDLE_GAMES.get(BundleType(bundle_key), [])
+                rep_draw = None
+                if primary_game:
+                    rep_draw = next(
+                        (d for d in group_draws if d.game_type == primary_game[0].value),
+                        None,
+                    )
+                if rep_draw is None:
+                    rep_draw = min(group_draws, key=lambda d: d.draw_number)
+
+                total_winnings = sum(
+                    (r.prize_amount for r in group_results), Decimal("0.00")
+                )
+                total_cost = sum(
+                    ((b.cost or Decimal("10.00")) for b in group_boards),
+                    Decimal("0.00"),
+                )
+                net_profit = total_winnings - total_cost
+                roi_pct = (
+                    float((net_profit / total_cost) * 100) if total_cost > 0 else 0.0
+                )
+
+                # Bundle-level board breakdown: one entry per board, sub-draw detail inside
+                by_board: Dict[int, List[BoardResult]] = {}
+                for r in group_results:
+                    by_board.setdefault(r.board_id, []).append(r)
                 board_evaluations: List[Dict[str, Any]] = []
-                seen_board_ids = set()
-                total_winnings = sum((r.prize_amount for r in results), Decimal("0.00"))
-                total_cost = Decimal("0.00")
-                boards_for_ai: List[GeneratedBoard] = []
-
-                for r in results:
-                    b = await db.get(GeneratedBoard, r.board_id)
-                    if b:
-                        if b.id not in seen_board_ids:
-                            seen_board_ids.add(b.id)
-                            total_cost += b.cost or Decimal("10.00")
-                            boards_for_ai.append(b)
-                        board_evaluations.append({
+                for b in sorted(group_boards, key=lambda x: x.id):
+                    rs = by_board.get(b.id, [])
+                    board_evaluations.append(
+                        {
                             "board_id": b.id,
                             "numbers": b.numbers,
                             "bonus_or_pb": b.bonus_or_powerball,
-                            "matched_count": r.matched_count,
-                            "matched_numbers": r.matched_numbers,
-                            "division": r.division,
-                            "prize": r.prize_amount,
-                        })
-
-                net_profit = total_winnings - total_cost
-                roi_pct = float((net_profit / total_cost) * 100) if total_cost > 0 else 0.0
-                special_ball = draw.powerball if "POWERBALL" in draw.game_type.upper() else draw.bonus_ball
-
-                # Send rich post-draw Telegram report with winning numbers & user boards
-                await self.notifier.notify_draw_completion(
-                    game_type=draw.game_type,
-                    draw_number=draw.draw_number,
-                    draw_date=draw.draw_date.isoformat(),
-                    winning_numbers=draw.numbers,
-                    bonus_or_pb=special_ball,
-                    board_evaluations=board_evaluations,
-                    total_winnings=total_winnings,
-                    total_cost=total_cost,
-                    roi_percentage=roi_pct,
-                )
-
-                # High matches alert if any board won a prize
-                winning_results = [r for r in results if r.prize_amount > Decimal("0.00")]
-                if winning_results:
-                    win_payload = [
-                        {
-                            "board_id": r.board_id,
-                            "matched_count": r.matched_count,
-                            "division": r.division,
-                            "prize": r.prize_amount,
+                            "board_total_prize": sum(
+                                (r.prize_amount for r in rs), Decimal("0.00")
+                            ),
+                            "sub_results": [
+                                {
+                                    "game_type": r.game_type,
+                                    "matched_count": r.matched_count,
+                                    "matched_numbers": r.matched_numbers,
+                                    "division": r.division,
+                                    "prize": r.prize_amount,
+                                }
+                                for r in rs
+                            ],
                         }
-                        for r in winning_results
-                    ]
-                    await self.notifier.notify_high_matches(
-                        game_type=draw.game_type,
-                        draw_number=draw.draw_number,
-                        winning_boards=win_payload,
-                        total_prize=total_winnings,
                     )
 
-                if boards_for_ai:
-                    try:
-                        fb = await self.ai_service.analyze_draw_performance(draw, boards_for_ai, results)
-                        feedback_summaries[f"draw_{draw_id}"] = {
-                            "accuracy": fb.accuracy_rate,
-                            "recommendations": fb.calibration_recommendations,
-                        }
-                    except Exception as fb_err:
-                        logger.error(f"Feedback loop error for draw #{draw_id}: {fb_err}")
+                sub_draws = [
+                    {
+                        "game_type": d.game_type,
+                        "draw_number": d.draw_number,
+                        "numbers": d.numbers,
+                        "bonus_or_pb": d.powerball
+                        if "POWERBALL" in d.game_type.upper()
+                        else d.bonus_ball,
+                    }
+                    for d in sorted(group_draws, key=lambda x: x.draw_number)
+                ]
 
+                # Notification (failure isolated from feedback persistence)
+                try:
+                    await self.notifier.notify_bundle_completion(
+                        bundle_name=bundle_key,
+                        target_date=target_date.isoformat(),
+                        sub_draws=sub_draws,
+                        board_evaluations=board_evaluations,
+                        total_winnings=total_winnings,
+                        total_cost=total_cost,
+                        roi_percentage=roi_pct,
+                    )
+                    winning_boards = [
+                        be
+                        for be in board_evaluations
+                        if be["board_total_prize"] > Decimal("0.00")
+                    ]
+                    if winning_boards:
+                        win_payload = []
+                        for be in winning_boards:
+                            best = max(
+                                be["sub_results"],
+                                key=lambda sr: sr["matched_count"],
+                                default={"matched_count": 0, "division": None},
+                            )
+                            win_payload.append(
+                                {
+                                    "board_id": be["board_id"],
+                                    "matched_count": best["matched_count"],
+                                    "division": best["division"],
+                                    "prize": be["board_total_prize"],
+                                }
+                            )
+                        await self.notifier.notify_high_matches(
+                            game_type=bundle_key,
+                            draw_number=rep_draw.draw_number,
+                            winning_boards=win_payload,
+                            total_prize=total_winnings,
+                        )
+                except Exception as notify_err:
+                    logger.error(
+                        f"Bundle notification failed for {bundle_key} {target_date}: "
+                        f"{notify_err}"
+                    )
+
+                # Feedback (aggregate + persist)
+                try:
+                    fb = await self.ai_service.analyze_draw_performance(
+                        rep_draw, group_boards, group_results
+                    )
+                    persisted = False
+                    try:
+                        await self.feedback_service.record_feedback(
+                            db,
+                            draw=rep_draw,
+                            bundle_name=bundle_key,
+                            boards=group_boards,
+                            results=group_results,
+                            feedback=fb,
+                            source="qwen",
+                        )
+                        persisted = True
+                    except Exception as persist_err:
+                        logger.error(
+                            f"Failed to persist feedback for {bundle_key} {target_date}: "
+                            f"{persist_err}"
+                        )
+                    feedback_summaries[f"{bundle_key}_{target_date.isoformat()}"] = {
+                        "accuracy": fb.accuracy_rate,
+                        "recommendations": fb.calibration_recommendations,
+                        "persisted": persisted,
+                        "boards_evaluated": len(group_boards),
+                    }
+                except Exception as fb_err:
+                    logger.error(
+                        f"Feedback loop error for {bundle_key} {target_date}: {fb_err}"
+                    )
         else:
-            # Fallback: If no user boards were pending for this cycle, broadcast newly scraped draw results
+            # Fallback: no user boards pending; broadcast newly scraped results per draw
             today = date.today()
             recent_draws_res = await db.execute(
                 select(Draw)
@@ -451,14 +587,23 @@ class PipelineOrchestrator:
                         roi_percentage=0.0,
                     )
 
+        evaluated_boards = {
+            bid for info in evaluated_targets.values() for bid in info["board_ids"]
+        }
+        evaluated_draws = {
+            did for info in evaluated_targets.values() for did in info["draw_ids"]
+        }
+
         logger.info(
-            f"Post-Draw Pipeline complete: {total_evaluated} boards evaluated across {len(evaluated_draw_ids)} draws."
+            f"Post-Draw Pipeline complete: {len(evaluated_boards)} boards across "
+            f"{total_evaluated} sub-results / {len(evaluated_draws)} draws."
         )
 
         return {
             "status": "COMPLETED",
-            "evaluated_boards_count": total_evaluated,
-            "evaluated_draws_count": len(evaluated_draw_ids),
+            "evaluated_sub_results": total_evaluated,
+            "evaluated_boards_count": len(evaluated_boards),
+            "evaluated_draws_count": len(evaluated_draws),
             "feedback_summaries": feedback_summaries,
         }
 

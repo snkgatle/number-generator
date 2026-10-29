@@ -1,5 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { MonthlyBudget, CircuitBreakerStatus, AllocationPlan, fetchAllocationPlan } from '../services/api';
+import {
+  MonthlyBudget,
+  CircuitBreakerStatus,
+  AllocationPlan,
+  fetchAllocationPlan,
+  fetchAllBudgets,
+} from '../services/api';
 import { ProgressBar } from './ui';
 import { formatZAR } from '../utils/format';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
@@ -13,11 +19,20 @@ interface BudgetTrackerProps {
 
 export const BudgetTracker: React.FC<BudgetTrackerProps> = ({ budget, circuitBreaker, loading }) => {
   const [plan, setPlan] = useState<AllocationPlan | null>(null);
+  const [dailyBudget, setDailyBudget] = useState<MonthlyBudget | null>(null);
+  const [dailyPlan, setDailyPlan] = useState<AllocationPlan | null>(null);
 
   useEffect(() => {
     fetchAllocationPlan()
       .then(setPlan)
       .catch(() => setPlan(null));
+    Promise.all([
+      fetchAllBudgets().catch(() => [] as MonthlyBudget[]),
+      fetchAllocationPlan(undefined, 'DAILY_LOTTO').catch(() => null),
+    ]).then(([budgets, dPlan]) => {
+      setDailyBudget(budgets.find((b) => b.pool === 'DAILY_LOTTO') ?? null);
+      setDailyPlan(dPlan);
+    });
   }, [budget?.remaining_boards]);
 
   if (loading && !budget) {
@@ -80,7 +95,20 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({ budget, circuitBre
     },
   ];
 
+  const dailyTotalBoards = dailyBudget?.total_boards ?? 0;
+  const dailyUsedBoards = dailyBudget?.used_boards ?? 0;
+  const dailyRemainingBoards = dailyBudget?.remaining_boards ?? dailyTotalBoards;
+  const dailyTotalBudget = Number(dailyBudget?.total_budget ?? 0);
+  const dailySpent = Number(dailyBudget?.spent_amount ?? 0);
+  const dailyRemainingBudget = Math.max(0, dailyTotalBudget - dailySpent);
+  const dailyPercentUsed = Math.min(
+    100,
+    (dailyUsedBoards / Math.max(1, dailyTotalBoards)) * 100
+  );
+  const dailyExhausted = dailyRemainingBoards <= 0;
+
   return (
+    <>
     <section className="card overflow-hidden" aria-labelledby="budget-heading">
       <div className="card-header bg-gradient-to-r from-surface-2 via-surface-2 to-surface-3/50">
         <div className="flex items-center gap-3">
@@ -225,5 +253,88 @@ export const BudgetTracker: React.FC<BudgetTrackerProps> = ({ budget, circuitBre
         </div>
       </div>
     </section>
+
+    {dailyBudget && (
+      <section className="card overflow-hidden" aria-labelledby="daily-budget-heading">
+        <div className="card-header bg-gradient-to-r from-surface-2 via-surface-2 to-surface-3/50">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 shadow-sm shadow-cyan-500/10">
+              <Wallet className="h-4 w-4" />
+            </div>
+            <div>
+              <h2 id="daily-budget-heading" className="card-title text-base">
+                Daily Lotto budget & board quota
+              </h2>
+              <p className="card-subtitle">
+                Cycle {dailyBudget.year_month} · pooled at {formatZAR(dailyBudget.cost_per_board)} per board · plays Sun, Mon & Thu
+              </p>
+            </div>
+          </div>
+
+          <span
+            className={`badge px-2.5 py-1 text-xs shadow-sm ${
+              dailyExhausted
+                ? 'badge-danger bg-rose-500/15 border border-rose-500/30 text-rose-300'
+                : 'badge-success bg-emerald-500/15 border border-emerald-500/30 text-emerald-300'
+            }`}
+          >
+            <span className={`dot ${dailyExhausted ? 'bg-rose-400 animate-pulse' : 'bg-emerald-400'}`} />
+            {dailyExhausted ? 'Budget exhausted' : 'Quota available'}
+          </span>
+        </div>
+
+        <div className="card-body space-y-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="inset p-3.5 border-l-2 border-l-cyan-500/80 bg-gradient-to-b from-surface-1 to-surface-2/70">
+              <div className="text-2xs font-medium uppercase tracking-wider text-zinc-400">Monthly budget</div>
+              <dd className="num mt-1.5 text-lg font-bold text-zinc-100">{formatZAR(dailyTotalBudget)}</dd>
+              <dd className="mt-0.5 text-xs text-zinc-500">{formatZAR(dailyBudget.cost_per_board)} per board</dd>
+            </div>
+            <div className="inset p-3.5 border-l-2 border-l-purple-500/80 bg-gradient-to-b from-surface-1 to-surface-2/70">
+              <div className="text-2xs font-medium uppercase tracking-wider text-zinc-400">Spent to date</div>
+              <dd className="num mt-1.5 text-lg font-bold text-zinc-100">{formatZAR(dailySpent)}</dd>
+              <dd className="mt-0.5 text-xs text-zinc-500">{dailyPercentUsed.toFixed(0)}% of pool</dd>
+            </div>
+            <div className={`inset p-3.5 border-l-2 bg-gradient-to-b from-surface-1 to-surface-2/70 ${dailyExhausted ? 'border-l-rose-500' : 'border-l-emerald-500'}`}>
+              <div className="text-2xs font-medium uppercase tracking-wider text-zinc-400">Remaining funds</div>
+              <dd className={`num mt-1.5 text-lg font-bold ${dailyExhausted ? 'text-rose-400' : 'text-emerald-400'}`}>
+                {formatZAR(dailyRemainingBudget)}
+              </dd>
+              <dd className="mt-0.5 text-xs text-zinc-500">{dailyRemainingBoards} board{dailyRemainingBoards === 1 ? '' : 's'} available</dd>
+            </div>
+            <div className="inset p-3.5 border-l-2 border-l-sky-500/80 bg-gradient-to-b from-surface-1 to-surface-2/70">
+              <div className="text-2xs font-medium uppercase tracking-wider text-zinc-400">Boards generated</div>
+              <dd className="num mt-1.5 text-lg font-bold text-zinc-100">{dailyUsedBoards} / {dailyTotalBoards}</dd>
+              <dd className="mt-0.5 text-xs text-zinc-500">Cap resets on 25th</dd>
+            </div>
+          </div>
+
+          {dailyPlan && dailyPlan.projected_draws_count > 0 && (
+            <div className="flex items-center gap-2 text-xs text-zinc-400 pt-2 border-t border-line/60">
+              <Gauge className="h-3.5 w-3.5 text-amber-400" />
+              <span>
+                <span className="font-medium text-zinc-300">Budget pacing:</span>{' '}
+                <span className="num">{dailyPlan.remaining_boards}</span> boards left across{' '}
+                <span className="num">{dailyPlan.projected_draws_count}</span> play days.
+              </span>
+            </div>
+          )}
+
+          <div className="space-y-2 pt-2 border-t border-line/60">
+            <div className="flex justify-between text-xs text-zinc-400">
+              <span>Cycle board consumption</span>
+              <span className="num font-semibold text-zinc-200">
+                {dailyUsedBoards} of {dailyTotalBoards} boards ({dailyPercentUsed.toFixed(0)}%)
+              </span>
+            </div>
+            <ProgressBar
+              value={dailyPercentUsed}
+              tone={dailyExhausted ? 'negative' : dailyPercentUsed > 75 ? 'warning' : 'default'}
+            />
+          </div>
+        </div>
+      </section>
+    )}
+    </>
   );
 };

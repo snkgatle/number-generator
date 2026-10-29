@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.analytics import TemporalAnalytics
 from app.models.draw import Draw
 from app.schemas.analytics import TemporalMetrics, TemporalPatternReviewResponse
-from app.schemas.enums import BUNDLE_GAMES, BundleType, GameType
+from app.schemas.enums import BUNDLE_GAMES, BundleType, GameType, is_bundle_key
 from app.services.ai_service import AIService
 
 
@@ -248,7 +248,7 @@ class TemporalAnalyticsService:
         """
         raw_val = game_type.value if hasattr(game_type, "value") else str(game_type)
 
-        if raw_val in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+        if is_bundle_key(raw_val):
             member_games = [
                 g.value for g in BUNDLE_GAMES.get(BundleType(raw_val), [])
             ]

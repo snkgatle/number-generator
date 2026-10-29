@@ -12,6 +12,10 @@ class MonthlyBudgetBase(BaseModel):
         pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
         description="Month in YYYY-MM format (e.g. 2026-10)",
     )
+    pool: str = Field(
+        default="BUNDLE",
+        description="Budget pool discriminator: 'BUNDLE' or 'DAILY_LOTTO'",
+    )
     total_budget: Decimal = Field(
         default=Decimal("200.00"),
         ge=0,
@@ -51,6 +55,7 @@ class MonthlyBudgetBase(BaseModel):
 class MonthlyBudgetCreate(BaseModel):
     """Payload to initialize a new monthly budget."""
     year_month: str = Field(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$")
+    pool: str = Field(default="BUNDLE", description="Budget pool: 'BUNDLE' or 'DAILY_LOTTO'")
     total_budget: Optional[Decimal] = Decimal("200.00")
     cost_per_board: Optional[Decimal] = Decimal("5.00")
 
@@ -76,6 +81,7 @@ class CircuitBreakerStatus(BaseModel):
     """Result of querying the budget circuit breaker before board generation."""
     allowed: bool = Field(..., description="Whether board generation is permitted")
     year_month: str
+    pool: str = Field(default="BUNDLE", description="Budget pool the status refers to")
     remaining_boards: int
     used_boards: int
     total_boards: int
@@ -100,6 +106,7 @@ class BoardAllocationRecommendation(BaseModel):
 class AllocationPlanResponse(BaseModel):
     """Month-wide overview of projected vs used board allocation."""
     year_month: str
+    pool: str = Field(default="BUNDLE", description="Budget pool for this plan")
     total_budget_zar: Decimal
     total_boards: int
     used_boards: int

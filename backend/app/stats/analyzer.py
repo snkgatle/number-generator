@@ -7,7 +7,7 @@ from collections import Counter
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from app.models.draw import Draw
-from app.schemas.enums import BUNDLE_RULES, BundleType, GAME_RULES, GameType
+from app.schemas.enums import BUNDLE_RULES, BundleType, GAME_RULES, GameType, is_bundle_key
 from app.schemas.stats import (
     ConsecutivePair,
     LLMPromptContext,
@@ -173,7 +173,7 @@ def calculate_special_ball_stats(
         return None
 
     raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
-    if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+    if is_bundle_key(raw_key):
         rules = BUNDLE_RULES.get(BundleType(raw_key), {})
     else:
         rules = GAME_RULES.get(game_type, {})
@@ -230,7 +230,7 @@ def generate_statistical_summary(
     including optimized variables formatted for Qwen-Max prompt templates.
     """
     raw_key = game_type.value if hasattr(game_type, "value") else str(game_type)
-    if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+    if is_bundle_key(raw_key):
         rules = BUNDLE_RULES.get(BundleType(raw_key), {})
     else:
         rules = GAME_RULES.get(game_type, {})

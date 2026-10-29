@@ -24,8 +24,8 @@ class GeneratedBoard(Base):
     """Represents a set of lottery numbers generated for a Game Bundle.
 
     Directive 21: One generated board applies to all sub-draws within that bundle
-    (e.g., LOTTO_FAMILY applies to Lotto, Plus 1, Plus 2;
-    POWERBALL_FAMILY applies to PowerBall and PowerBall Plus).
+    (e.g., LOTTO_FAMILY applies to Lotto, Plus 1, Plus 2; POWERBALL_FAMILY
+    applies to PowerBall and PowerBall Plus; DAILY_LOTTO is standalone).
     """
 
     __tablename__ = "generated_boards"
@@ -53,7 +53,7 @@ class GeneratedBoard(Base):
         String(50),
         nullable=False,
         index=True,
-        comment="Bundle identifier: 'LOTTO_FAMILY' or 'POWERBALL_FAMILY'",
+        comment="Bundle identifier: 'LOTTO_FAMILY', 'POWERBALL_FAMILY' or 'DAILY_LOTTO'",
     )
     game_type: Mapped[Optional[str]] = mapped_column(
         String(50),
@@ -123,8 +123,10 @@ class GeneratedBoard(Base):
         elif "game_type" in kwargs and "bundle_name" not in kwargs:
             kwargs["bundle_name"] = kwargs["game_type"]
         elif "bundle_name" not in kwargs and "game_type" not in kwargs:
-            kwargs["bundle_name"] = "LOTTO_FAMILY"
-            kwargs["game_type"] = "LOTTO_FAMILY"
+            raise ValueError(
+                "GeneratedBoard requires either 'bundle_name' or 'game_type'; "
+                "refusing to silently default to LOTTO_FAMILY."
+            )
         super().__init__(**kwargs)
 
     @property

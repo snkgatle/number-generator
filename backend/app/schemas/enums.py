@@ -11,15 +11,18 @@ class GameType(str, Enum):
     LOTTO_PLUS_2 = "LOTTO_PLUS_2"
     POWERBALL = "POWERBALL"
     POWERBALL_PLUS = "POWERBALL_PLUS"
+    DAILY_LOTTO = "DAILY_LOTTO"
 
 
 class BundleType(str, Enum):
     """Playable lottery bundles grouping sub-draws (Directive 21).
 
     One generated board applies to all sub-draws within the bundle.
+    DAILY_LOTTO is a single-member bundle (standalone game).
     """
     LOTTO_FAMILY = "LOTTO_FAMILY"
     POWERBALL_FAMILY = "POWERBALL_FAMILY"
+    DAILY_LOTTO = "DAILY_LOTTO"
 
 
 class BoardStatus(str, Enum):
@@ -36,6 +39,7 @@ class BoardStatus(str, Enum):
 BUNDLE_GAMES: Dict[BundleType, List[GameType]] = {
     BundleType.LOTTO_FAMILY: [GameType.LOTTO, GameType.LOTTO_PLUS_1, GameType.LOTTO_PLUS_2],
     BundleType.POWERBALL_FAMILY: [GameType.POWERBALL, GameType.POWERBALL_PLUS],
+    BundleType.DAILY_LOTTO: [GameType.DAILY_LOTTO],
 }
 
 # Reverse mapping from sub-draw to parent bundle
@@ -45,6 +49,7 @@ GAME_TO_BUNDLE: Dict[GameType, BundleType] = {
     GameType.LOTTO_PLUS_2: BundleType.LOTTO_FAMILY,
     GameType.POWERBALL: BundleType.POWERBALL_FAMILY,
     GameType.POWERBALL_PLUS: BundleType.POWERBALL_FAMILY,
+    GameType.DAILY_LOTTO: BundleType.DAILY_LOTTO,
 }
 
 
@@ -95,6 +100,14 @@ GAME_RULES = {
         "powerball_min": 1,
         "powerball_max": 16,
     },
+    GameType.DAILY_LOTTO: {
+        "main_numbers_count": 5,
+        "main_number_min": 1,
+        "main_number_max": 36,
+        "has_bonus": False,
+        "has_powerball": False,
+        "mc_hit_threshold": 2,
+    },
 }
 
 # Bundle specifications (matrix rules and true bundled cost)
@@ -121,6 +134,17 @@ BUNDLE_RULES = {
         "powerball_max": 16,
         "total_cost": 10.00,
     },
+    BundleType.DAILY_LOTTO: {
+        "bundle_name": "DAILY_LOTTO",
+        "display_name": "Daily Lotto (5 from 36)",
+        "main_numbers_count": 5,
+        "main_number_min": 1,
+        "main_number_max": 36,
+        "has_bonus": False,
+        "has_powerball": False,
+        "mc_hit_threshold": 2,
+        "total_cost": 3.00,
+    },
 }
 
 # Standard draw schedule mapping by weekday (0=Monday, 1=Tuesday, ..., 6=Sunday)
@@ -130,17 +154,29 @@ GAME_DRAW_DAYS = {
     GameType.LOTTO: [2, 5],              # Wednesday, Saturday
     GameType.LOTTO_PLUS_1: [2, 5],       # Wednesday, Saturday
     GameType.LOTTO_PLUS_2: [2, 5],       # Wednesday, Saturday
+    GameType.DAILY_LOTTO: [0, 3, 6],     # Monday, Thursday, Sunday (system play days)
 }
 
 BUNDLE_DRAW_DAYS = {
     BundleType.POWERBALL_FAMILY: [1, 4],  # Tuesday, Friday
     BundleType.LOTTO_FAMILY: [2, 5],      # Wednesday, Saturday
+    BundleType.DAILY_LOTTO: [0, 3, 6],    # Monday, Thursday, Sunday (system play days)
 }
 
 
 def game_key(game_or_bundle: Union[GameType, BundleType, str]) -> str:
     """Normalizes a GameType, BundleType, or raw string to its canonical string key."""
     return game_or_bundle.value if hasattr(game_or_bundle, "value") else str(game_or_bundle)
+
+
+def is_bundle_key(key: str) -> bool:
+    """Returns True when the raw key identifies a game bundle."""
+    return key in {b.value for b in BundleType}
+
+
+def budget_pool_for_bundle(game_or_bundle: Union[GameType, BundleType, str]) -> str:
+    """Maps a game/bundle to its isolated monthly budget pool (Directive 23)."""
+    return "DAILY_LOTTO" if game_key(game_or_bundle) == "DAILY_LOTTO" else "BUNDLE"
 
 
 def resolve_rules(game_or_bundle: Union[GameType, BundleType, str]) -> Dict:
@@ -150,7 +186,7 @@ def resolve_rules(game_or_bundle: Union[GameType, BundleType, str]) -> Dict:
     and an empty dict for unrecognized values.
     """
     key = game_key(game_or_bundle)
-    if key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+    if is_bundle_key(key):
         return BUNDLE_RULES.get(BundleType(key), {})
     try:
         return GAME_RULES.get(GameType(key), {})
@@ -163,10 +199,14 @@ def get_next_draw_date(game_or_bundle: Union[GameType, BundleType, str], ref_dat
     base = ref_date or date.today()
     val = game_or_bundle.value if hasattr(game_or_bundle, "value") else str(game_or_bundle)
 
-    if val in ("POWERBALL_FAMILY", "POWERBALL", "POWERBALL_PLUS"):
-        draw_days = [1, 4]
-    else:
-        draw_days = [2, 5]
+    draw_days = BUNDLE_DRAW_DAYS.get(BundleType(val)) if is_bundle_key(val) else None
+    if draw_days is None:
+        try:
+            draw_days = GAME_DRAW_DAYS.get(GameType(val))
+        except ValueError:
+            draw_days = None
+    if not draw_days:
+        draw_days = [1, 4] if "POWERBALL" in val else [2, 5]
 
     for offset in range(7):
         candidate = base + timedelta(days=offset)

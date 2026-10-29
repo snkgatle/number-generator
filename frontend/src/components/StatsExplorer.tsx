@@ -55,11 +55,16 @@ export const StatsExplorer: React.FC = () => {
   // Resolve which game name to show — maps bundle selections to their representative API endpoint
   const getApiGameForBundle = (bundleId: string): string => {
     if (bundleId === 'LOTTO_FAMILY') return 'LOTTO';
+    if (bundleId === 'DAILY_LOTTO') return 'DAILY_LOTTO';
     return 'POWERBALL';
   };
 
   const viewName = (() => {
-    if (selectedGame === 'LOTTO_FAMILY' || selectedGame === 'POWERBALL_FAMILY') {
+    if (
+      selectedGame === 'LOTTO_FAMILY' ||
+      selectedGame === 'POWERBALL_FAMILY' ||
+      selectedGame === 'DAILY_LOTTO'
+    ) {
       return { displayName: bundleLabel(selectedGame), apiKey: getApiGameForBundle(selectedGame) };
     }
     return { displayName: gameLabel(selectedGame), apiKey: selectedGame };

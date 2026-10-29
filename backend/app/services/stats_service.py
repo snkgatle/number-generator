@@ -18,6 +18,7 @@ from app.schemas.enums import (
     GAME_RULES,
     GameType,
     game_key,
+    is_bundle_key,
     resolve_rules,
 )
 from app.schemas.stats import (
@@ -44,7 +45,7 @@ class StatsService:
     ) -> List[Draw]:
         """Queries the database for the last N official draws for a specific game or bundle."""
         raw_val = game_type.value if hasattr(game_type, "value") else str(game_type)
-        if raw_val in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+        if is_bundle_key(raw_val):
             b_type = BundleType(raw_val)
             member_games = [g.value for g in BUNDLE_GAMES.get(b_type, [])]
             query = (
@@ -214,8 +215,16 @@ class StatsService:
                 llm_prompt_summary=None,
             )
 
-        # Ball decade buckets: 1-10, 11-20, 21-30, 31-40, 41-52
-        decade_buckets = [(1, 10), (11, 20), (21, 30), (31, 40), (41, 52)]
+        # Decade buckets derived from the observed number range (supports 1-36,
+        # 1-50 and 1-52 matrices without leaking empty buckets).
+        max_observed = max(
+            (max(d.numbers) for d in draws if d.numbers),
+            default=52,
+        )
+        decade_buckets = [
+            (start, min(start + 9, max_observed))
+            for start in range(1, max_observed + 1, 10)
+        ]
 
         for feat in features:
             # Group draws by categorical feature value
@@ -356,12 +365,16 @@ class StatsService:
             m3_plus = sum(1 for m in matches if m >= 3) / iterations
             m4_plus = sum(1 for m in matches if m >= 4) / iterations
 
-            # Hit rate = probability of >= 3 matches (or >= 2 for PowerBall games)
-            hit_rate = m2_plus if rules.get("has_powerball") else m3_plus
+            # Hit rate = probability of reaching the game's minimum prize match
+            # (Daily Lotto pays from 2 matches, PowerBall from 2, Lotto from 3).
+            hit_threshold = rules.get(
+                "mc_hit_threshold", 2 if rules.get("has_powerball") else 3
+            )
+            hit_rate = m2_plus if hit_threshold <= 2 else m3_plus
 
             logger.info(
                 f"Monte Carlo stress test | Board #{idx + 1} {b_nums} | "
-                f"Hit Rate (>={2 if rules.get('has_powerball') else 3} matches): {hit_rate * 100:.2f}% "
+                f"Hit Rate (>={hit_threshold} matches): {hit_rate * 100:.2f}% "
                 f"(>=4: {m4_plus * 100:.2f}%) across {iterations:,} iterations"
             )
 

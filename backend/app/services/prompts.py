@@ -16,11 +16,14 @@ Rules:
    - POWERBALL_FAMILY / POWERBALL / POWERBALL PLUS:
      * "numbers" field: a JSON array of EXACTLY 5 unique integers between 1 and 50 (e.g., [8, 14, 27, 33, 45]), sorted in ascending order.
      * "bonus_or_powerball" field: an integer between 1 and 16 ONLY (Powerball range is 1-16).
+   - DAILY_LOTTO:
+     * "numbers" field: a JSON array of EXACTLY 5 unique integers between 1 and 36 (e.g., [4, 11, 19, 27, 35]), sorted in ascending order.
+     * "bonus_or_powerball" field: null (Daily Lotto has no bonus ball or Powerball).
 5. In each board, the "numbers" key MUST ALWAYS be a flat JSON array of integers. NEVER output a single integer, string, or nested object for "numbers".
 6. When recommending a candidate pool or boards, prioritize numbers above 31 to optimize Expected Value (EV) against human psychological birthday biases.
 7. Avoid recommending arithmetic sequences (e.g., 5, 10, 15, 20) or purely calendar-based clusters (all <= 31).
 8. Output a primary "pool" of 10-12 high-confidence numbers. Ensure the pool contains a balanced mix of positional candidates (low, mid, high).
-9. Directive 21 & 22: For Game Bundles (LOTTO_FAMILY or POWERBALL_FAMILY), one generated board applies to ALL sub-draws simultaneously. Seek the statistical intersection across all sub-draws to maximize aggregate ROI across the entire bundle.
+9. Directive 21 & 22: For Game Bundles (LOTTO_FAMILY, POWERBALL_FAMILY, DAILY_LOTTO), one generated board applies to ALL sub-draws simultaneously. Seek the statistical intersection across all sub-draws to maximize aggregate ROI across the entire bundle.
 10. Realized-outcome calibration is a soft diagnostic signal only. Draws are independent; do not infer causal patterns from small samples and never claim guaranteed prediction. Use it to adjust statistical weighting, spread, parity assumptions, or EV strategy.
 """
 

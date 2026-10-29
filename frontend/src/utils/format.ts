@@ -8,6 +8,7 @@ export const GAMES = [
   { id: 'LOTTO_PLUS_2', label: 'Lotto Plus 2', days: 'Wed & Sat', drawDays: [3, 6], matrix: '6 from 1–52 + bonus' },
   { id: 'POWERBALL', label: 'PowerBall', days: 'Tue & Fri', drawDays: [2, 5], matrix: '5 from 1–50 + PB 1–16' },
   { id: 'POWERBALL_PLUS', label: 'PowerBall Plus', days: 'Tue & Fri', drawDays: [2, 5], matrix: '5 from 1–50 + PB 1–16' },
+  { id: 'DAILY_LOTTO', label: 'Daily Lotto', days: 'Sun, Mon & Thu', drawDays: [0, 1, 4], matrix: '5 from 1–36' },
 ] as const;
 
 export const BUNDLES = [
@@ -34,6 +35,18 @@ export const BUNDLES = [
     matrix: '5 from 1–50 + PB 1–16',
     badgeClass: 'badge-powerball',
     description: '1 board enters both sub-draws (PowerBall R5 + PowerBall Plus R5)',
+  },
+  {
+    id: 'DAILY_LOTTO',
+    label: 'Daily Lotto',
+    subGames: ['DAILY_LOTTO'],
+    subGamesDisplay: 'Daily Lotto',
+    days: 'Sun, Mon & Thu',
+    drawDays: [0, 1, 4],
+    costPerBoard: 3.0,
+    matrix: '5 from 1–36',
+    badgeClass: 'badge-daily',
+    description: '1 board plays the Daily Lotto draw (R3.00 per board)',
   },
 ] as const;
 

@@ -7,6 +7,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -21,14 +22,24 @@ class MonthlyBudget(Base):
     """
 
     __tablename__ = "monthly_budgets"
+    __table_args__ = (
+        UniqueConstraint("year_month", "pool", name="uq_monthly_budget_period_pool"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     year_month: Mapped[str] = mapped_column(
         String(7),
-        unique=True,
         index=True,
         nullable=False,
         comment="Formatted as YYYY-MM, e.g., 2026-10",
+    )
+    pool: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="BUNDLE",
+        server_default="BUNDLE",
+        index=True,
+        comment="Budget pool: 'BUNDLE' or 'DAILY_LOTTO'",
     )
     total_budget: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
@@ -82,7 +93,7 @@ class MonthlyBudget(Base):
 
     def __repr__(self) -> str:
         return (
-            f"<MonthlyBudget {self.year_month}: "
+            f"<MonthlyBudget {self.year_month}/{self.pool}: "
             f"{self.remaining_boards}/{self.total_boards} boards left "
             f"(exhausted={self.is_exhausted})>"
         )

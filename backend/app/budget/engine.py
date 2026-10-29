@@ -21,7 +21,7 @@ from app.schemas.budget import (
     BoardAllocationRecommendation,
     CircuitBreakerStatus,
 )
-from app.schemas.enums import BundleType, GameType
+from app.schemas.enums import BundleType, GameType, budget_pool_for_bundle
 
 
 class BudgetExhaustedException(Exception):
@@ -74,24 +74,33 @@ class BudgetEngine:
         return cycle_key
 
     async def get_or_create_monthly_budget(
-        self, db: AsyncSession, year_month: Optional[str] = None
+        self, db: AsyncSession, year_month: Optional[str] = None, pool: str = "BUNDLE"
     ) -> MonthlyBudget:
-        """Retrieves or initializes the monthly budget record for the given period.
+        """Retrieves or initializes the monthly budget record for the given period and pool.
 
-        Initializes with default values: R200 budget, R10/board = 20 boards (Directive 23).
+        Pools isolate the bundle quota (Lotto/PowerBall, R10/board) from the
+        Daily Lotto quota (R3/board).
         """
         ym = year_month or self.current_year_month()
-        query = select(MonthlyBudget).where(MonthlyBudget.year_month == ym)
+        query = select(MonthlyBudget).where(
+            MonthlyBudget.year_month == ym,
+            MonthlyBudget.pool == pool,
+        )
         result = await db.execute(query)
         budget = result.scalar_one_or_none()
 
         if not budget:
-            total_budget = Decimal(str(settings.DEFAULT_MONTHLY_BUDGET))
-            cost_per_board = Decimal(str(settings.COST_PER_BOARD))
+            if pool == "DAILY_LOTTO":
+                total_budget = Decimal(str(settings.DAILY_LOTTO_MONTHLY_BUDGET))
+                cost_per_board = Decimal(str(settings.DAILY_LOTTO_COST_PER_BOARD))
+            else:
+                total_budget = Decimal(str(settings.BUNDLE_MONTHLY_BUDGET))
+                cost_per_board = Decimal(str(settings.COST_PER_BOARD))
             total_boards = int(total_budget // cost_per_board)
 
             budget = MonthlyBudget(
                 year_month=ym,
+                pool=pool,
                 total_budget=total_budget,
                 cost_per_board=cost_per_board,
                 total_boards=total_boards,
@@ -104,20 +113,20 @@ class BudgetEngine:
             await db.commit()
             await db.refresh(budget)
             logger.info(
-                f"Initialized new monthly budget for {ym}: R{total_budget} ({total_boards} boards)."
+                f"Initialized new monthly budget for {ym}/{pool}: R{total_budget} ({total_boards} boards)."
             )
 
         return budget
 
     async def check_circuit_breaker(
-        self, db: AsyncSession, boards_requested: int = 1, year_month: Optional[str] = None
+        self, db: AsyncSession, boards_requested: int = 1, year_month: Optional[str] = None, pool: str = "BUNDLE"
     ) -> Tuple[bool, MonthlyBudget]:
         """Directive 3 Circuit Breaker verification.
 
         Before ANY board generation logic executes, query the monthly_budgets table.
         If remaining_boards <= 0, halt execution and log 'Budget Exhausted'.
         """
-        budget = await self.get_or_create_monthly_budget(db, year_month=year_month)
+        budget = await self.get_or_create_monthly_budget(db, year_month=year_month, pool=pool)
 
         if budget.remaining_boards <= 0 or budget.is_exhausted:
             logger.error(
@@ -136,10 +145,10 @@ class BudgetEngine:
         return True, budget
 
     async def get_circuit_breaker_status(
-        self, db: AsyncSession, year_month: Optional[str] = None
+        self, db: AsyncSession, year_month: Optional[str] = None, pool: str = "BUNDLE"
     ) -> CircuitBreakerStatus:
-        """Returns the current status of the budget circuit breaker."""
-        budget = await self.get_or_create_monthly_budget(db, year_month=year_month)
+        """Returns the current status of the budget circuit breaker for a pool."""
+        budget = await self.get_or_create_monthly_budget(db, year_month=year_month, pool=pool)
         allowed = budget.remaining_boards > 0 and not budget.is_exhausted
         message = (
             "Active - board generation permitted"
@@ -149,6 +158,7 @@ class BudgetEngine:
         return CircuitBreakerStatus(
             allowed=allowed,
             year_month=budget.year_month,
+            pool=budget.pool,
             remaining_boards=budget.remaining_boards,
             used_boards=budget.used_boards,
             total_boards=budget.total_boards,
@@ -158,12 +168,12 @@ class BudgetEngine:
         )
 
     def calculate_remaining_draws_in_month(
-        self, target_date: Optional[date] = None
+        self, target_date: Optional[date] = None, pool: str = "BUNDLE"
     ) -> Dict[str, int]:
-        """Calculates total and remaining draw events in the active budget cycle across all game families.
+        """Calculates total and remaining draw events in the active budget cycle for a pool.
 
-        LOTTO variants: Wednesday (day 2) and Saturday (day 5)
-        POWERBALL variants: Tuesday (day 1) and Friday (day 4)
+        BUNDLE pool: LOTTO (Wed/Sat) + POWERBALL (Tue/Fri).
+        DAILY_LOTTO pool: Monday, Thursday, Sunday (system play days).
         Active cycle: rollover day (25th) of month M to 24th of month M+1.
         """
         ref_date = target_date or date.today()
@@ -173,30 +183,42 @@ class BudgetEngine:
         lotto_draws_remaining = 0
         powerball_draws_total = 0
         powerball_draws_remaining = 0
+        daily_draws_total = 0
+        daily_draws_remaining = 0
 
         current = cycle_start
         while current <= cycle_end:
-            weekday = current.weekday()  # Monday=0, Tuesday=1, Wednesday=2, Friday=4, Saturday=5
+            weekday = current.weekday()  # Monday=0 ... Sunday=6
             is_future_or_today = current >= ref_date
 
-            if weekday in (2, 5):  # Wed, Sat -> LOTTO, LOTTO PLUS 1, LOTTO PLUS 2
+            if weekday in (2, 5):  # Wed, Sat -> LOTTO family
                 lotto_draws_total += 1
                 if is_future_or_today:
                     lotto_draws_remaining += 1
 
-            if weekday in (1, 4):  # Tue, Fri -> POWERBALL, POWERBALL PLUS
+            if weekday in (1, 4):  # Tue, Fri -> POWERBALL family
                 powerball_draws_total += 1
                 if is_future_or_today:
                     powerball_draws_remaining += 1
 
+            if weekday in (0, 3, 6):  # Mon, Thu, Sun -> DAILY LOTTO play days
+                daily_draws_total += 1
+                if is_future_or_today:
+                    daily_draws_remaining += 1
+
             current += timedelta(days=1)
 
+        bundle_remaining = lotto_draws_remaining + powerball_draws_remaining
         return {
             "lotto_draws_total": lotto_draws_total,
             "lotto_draws_remaining": lotto_draws_remaining,
             "powerball_draws_total": powerball_draws_total,
             "powerball_draws_remaining": powerball_draws_remaining,
-            "total_draws_remaining": lotto_draws_remaining + powerball_draws_remaining,
+            "daily_lotto_draws_total": daily_draws_total,
+            "daily_lotto_draws_remaining": daily_draws_remaining,
+            "total_draws_remaining": (
+                daily_draws_remaining if pool == "DAILY_LOTTO" else bundle_remaining
+            ),
         }
 
     async def calculate_confidence_allocation(
@@ -206,6 +228,7 @@ class BudgetEngine:
         target_date: Optional[date] = None,
         confidence_score: Optional[float] = None,
         performance_summary: Optional[FeedbackPerformanceSummary] = None,
+        pool: Optional[str] = None,
     ) -> BoardAllocationRecommendation:
         """Computes board allocation for a draw based on statistical confidence and monthly quota.
 
@@ -218,9 +241,12 @@ class BudgetEngine:
         """
         draw_date = target_date or date.today()
         ym = self.current_year_month(draw_date)
+        active_pool = pool or budget_pool_for_bundle(game_type)
 
         # Directive 3 Circuit Breaker Check
-        allowed, budget = await self.check_circuit_breaker(db, boards_requested=1, year_month=ym)
+        allowed, budget = await self.check_circuit_breaker(
+            db, boards_requested=1, year_month=ym, pool=active_pool
+        )
 
         base_boards = 1
         bonus_boards = 0
@@ -230,7 +256,7 @@ class BudgetEngine:
         if confidence_score is not None:
             if confidence_score >= self.CONFIDENCE_BONUS_THRESHOLD:
                 # Check if there is budget surplus to grant bonus board
-                draws_info = self.calculate_remaining_draws_in_month(draw_date)
+                draws_info = self.calculate_remaining_draws_in_month(draw_date, pool=active_pool)
                 remaining_draws = draws_info["total_draws_remaining"]
 
                 # If remaining boards exceeds remaining future draws, grant bonus board
@@ -258,7 +284,7 @@ class BudgetEngine:
             and performance_summary.has_sufficient_data
             and performance_summary.avg_roi > 0
         ):
-            draws_info = self.calculate_remaining_draws_in_month(draw_date)
+            draws_info = self.calculate_remaining_draws_in_month(draw_date, pool=active_pool)
             if budget.remaining_boards > draws_info["total_draws_remaining"]:
                 performance_bonus = 1
                 reasoning_parts.append(
@@ -296,14 +322,15 @@ class BudgetEngine:
         db: AsyncSession,
         boards_count: int = 1,
         year_month: Optional[str] = None,
+        pool: str = "BUNDLE",
     ) -> MonthlyBudget:
-        """Deducts boards from the monthly quota and persists spend.
+        """Deducts boards from the monthly quota and persists spend for a pool.
 
         If remaining_boards drops to 0, sets is_exhausted = True.
         Clamps usage to remaining quota to prevent over-deduction.
         """
         allowed, budget = await self.check_circuit_breaker(
-            db, boards_requested=boards_count, year_month=year_month
+            db, boards_requested=boards_count, year_month=year_month, pool=pool
         )
 
         if not allowed or budget.remaining_boards <= 0 or budget.is_exhausted:
@@ -335,22 +362,28 @@ class BudgetEngine:
         return budget
 
     async def get_allocation_plan(
-        self, db: AsyncSession, year_month: Optional[str] = None
+        self, db: AsyncSession, year_month: Optional[str] = None, pool: str = "BUNDLE"
     ) -> AllocationPlanResponse:
-        """Generates a comprehensive month overview with projected draw allocations."""
-        budget = await self.get_or_create_monthly_budget(db, year_month=year_month)
-        draws_info = self.calculate_remaining_draws_in_month()
+        """Generates a comprehensive month overview with projected draw allocations for a pool."""
+        budget = await self.get_or_create_monthly_budget(db, year_month=year_month, pool=pool)
+        draws_info = self.calculate_remaining_draws_in_month(pool=pool)
 
         # Build sample baseline recommendation for next upcoming draws
         sample_recs = []
-        for g in [GameType.LOTTO, GameType.POWERBALL]:
+        sample_games = (
+            [BundleType.DAILY_LOTTO]
+            if pool == "DAILY_LOTTO"
+            else [GameType.LOTTO, GameType.POWERBALL]
+        )
+        for g in sample_games:
             rec = await self.calculate_confidence_allocation(
-                db, game_type=g, target_date=date.today(), confidence_score=86.5
+                db, game_type=g, target_date=date.today(), confidence_score=86.5, pool=pool
             )
             sample_recs.append(rec)
 
         return AllocationPlanResponse(
             year_month=budget.year_month,
+            pool=budget.pool,
             total_budget_zar=budget.total_budget,
             total_boards=budget.total_boards,
             used_boards=budget.used_boards,

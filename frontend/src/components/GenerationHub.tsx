@@ -3,6 +3,7 @@ import { Ball, BallRow } from './Ball';
 import {
   generateBoards,
   fetchGameStatistics,
+  fetchCircuitBreaker,
   GeneratedBoard,
   StatisticalAnalysis,
   CircuitBreakerStatus,
@@ -37,12 +38,21 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
   const [statsLoading, setStatsLoading] = useState<boolean>(false);
   const [generating, setGenerating] = useState<boolean>(false);
   const [generatedBoards, setGeneratedBoards] = useState<GeneratedBoard[]>([]);
+  const [poolBreaker, setPoolBreaker] = useState<CircuitBreakerStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   // Sync target date when game changes
   useEffect(() => {
     setTargetDate(nextDrawDate(selectedGame));
+  }, [selectedGame]);
+
+  // Load the circuit breaker for the pool that owns the selected bundle
+  useEffect(() => {
+    const pool = selectedGame === 'DAILY_LOTTO' ? 'DAILY_LOTTO' : 'BUNDLE';
+    fetchCircuitBreaker(pool)
+      .then(setPoolBreaker)
+      .catch(() => setPoolBreaker(null));
   }, [selectedGame]);
 
   // Load statistical summary for selected game or bundle
@@ -61,8 +71,9 @@ export const GenerationHub: React.FC<GenerationHubProps> = ({
       });
   }, [selectedGame]);
 
-  const isExhausted = Boolean(circuitBreaker?.is_exhausted) || (circuitBreaker?.remaining_boards ?? 0) <= 0;
-  const remainingQuota = circuitBreaker?.remaining_boards ?? 20;
+  const activeBreaker = poolBreaker ?? circuitBreaker;
+  const isExhausted = Boolean(activeBreaker?.is_exhausted) || (activeBreaker?.remaining_boards ?? 0) <= 0;
+  const remainingQuota = activeBreaker?.remaining_boards ?? 20;
   const currentBundle = bundleForGame(selectedGame);
   const costPerBoard = currentBundle?.costPerBoard ?? 10.0;
   const estimatedCost = allocatedBoards * costPerBoard;

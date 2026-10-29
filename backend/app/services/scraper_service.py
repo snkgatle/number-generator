@@ -64,6 +64,18 @@ LOTTERY_GAME_CONFIG: Dict[GameType, Dict[str, Any]] = {
         "has_bonus": False,
         "has_powerball": True,
     },
+    # Daily Lotto: 5 numbers from 1-36, no bonus, no PowerBall. Identifiers
+    # verified against a live /api/engine/draw/issueWinPoolInfoPageQuery call
+    # on 2026-10-29 (gameId=11001, winPoolId=100, plusFlag=0, 5 win numbers).
+    GameType.DAILY_LOTTO: {
+        "gameId": 11001,
+        "winPoolId": 100,
+        "plusFlag": 0,
+        "name": "Daily Lotto",
+        "main_count": 5,
+        "has_bonus": False,
+        "has_powerball": False,
+    },
 }
 
 BASE_RESULTS_URL = "https://www.nationallottery.co.za/#/results"
@@ -346,6 +358,7 @@ class ScraperService:
             GameType.LOTTO_PLUS_1,
             GameType.LOTTO_PLUS_2,
             GameType.POWERBALL_PLUS,
+            GameType.DAILY_LOTTO,
         ]
 
         details: List[ScrapeGameResult] = []

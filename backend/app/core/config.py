@@ -46,18 +46,30 @@ class Settings(BaseSettings):
         description="Target model identifier for temporal analytics and pattern reviews",
     )
 
-    # Budget & Allocation Rules (Directive 23: R10/board = 20 boards/month)
+    # Budget & Allocation Rules (Directive 23: pooled budgets, isolated per family)
     DEFAULT_MONTHLY_BUDGET: float = Field(
         default=200.00,
-        description="Default monthly budget in ZAR",
+        description="Default monthly bundle budget in ZAR (alias of BUNDLE_MONTHLY_BUDGET)",
+    )
+    BUNDLE_MONTHLY_BUDGET: float = Field(
+        default=200.00,
+        description="Monthly budget pool for Lotto/PowerBall bundles in ZAR",
+    )
+    DAILY_LOTTO_MONTHLY_BUDGET: float = Field(
+        default=50.00,
+        description="Monthly budget pool for Daily Lotto in ZAR",
     )
     COST_PER_BOARD: float = Field(
         default=10.00,
         description="Cost in ZAR per bundled board generated (Directive 23)",
     )
+    DAILY_LOTTO_COST_PER_BOARD: float = Field(
+        default=3.00,
+        description="Cost in ZAR per Daily Lotto board",
+    )
     TOTAL_MONTHLY_BOARDS: int = Field(
         default=20,
-        description="Default max boards per month (200 / 10 = 20) (Directive 23)",
+        description="Default max bundle boards per month (200 / 10 = 20) (Directive 23)",
     )
     BUDGET_CYCLE_ROLLOVER_DAY: int = Field(
         default=25,

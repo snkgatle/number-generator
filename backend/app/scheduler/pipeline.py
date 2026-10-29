@@ -21,9 +21,12 @@ from app.models.bundle import GameBundle
 from app.models.draw import Draw
 from app.schemas.enums import (
     BUNDLE_GAMES,
+    GAME_TO_BUNDLE,
     BoardStatus,
     BundleType,
     GameType,
+    budget_pool_for_bundle,
+    is_bundle_key,
 )
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
@@ -34,12 +37,16 @@ from app.services.prize_service import PrizeService
 from app.services.scraper_service import ScraperService
 from app.services.stats_service import StatsService
 
-# Directive 21: Group into Game Bundles (one board plays all sub-draws)
+# Directive 21: Group into Game Bundles (one board plays all sub-draws).
+# Daily Lotto is a single-member bundle played only on Sun/Mon/Thu.
 SCHEDULED_BUNDLES_BY_WEEKDAY = {
+    0: [BundleType.DAILY_LOTTO],       # Monday: Daily Lotto
     1: [BundleType.POWERBALL_FAMILY],  # Tuesday: PowerBall + PowerBall Plus
     2: [BundleType.LOTTO_FAMILY],      # Wednesday: Lotto + Plus 1 + Plus 2
+    3: [BundleType.DAILY_LOTTO],       # Thursday: Daily Lotto
     4: [BundleType.POWERBALL_FAMILY],  # Friday: PowerBall + PowerBall Plus
     5: [BundleType.LOTTO_FAMILY],      # Saturday: Lotto + Plus 1 + Plus 2
+    6: [BundleType.DAILY_LOTTO],       # Sunday: Daily Lotto
 }
 
 SCHEDULED_GAMES_BY_WEEKDAY = SCHEDULED_BUNDLES_BY_WEEKDAY
@@ -99,10 +106,12 @@ class PipelineOrchestrator:
         bundles: List[BundleType] = []
         for it in raw_items:
             s = it.value if hasattr(it, "value") else str(it)
-            if s in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+            if is_bundle_key(s):
                 b = BundleType(s)
             elif "POWERBALL" in s:
                 b = BundleType.POWERBALL_FAMILY
+            elif "DAILY" in s:
+                b = BundleType.DAILY_LOTTO
             else:
                 b = BundleType.LOTTO_FAMILY
             if b not in bundles:
@@ -120,32 +129,42 @@ class PipelineOrchestrator:
 
         total_generated = 0
         results_by_game = {}
+        remaining_by_pool: Dict[str, int] = {}
+        halted = False
+        budget = None
         cycle_key = self.budget_engine.current_year_month(ref_date)
 
-        # 1. Directive 3 Circuit Breaker Check
-        try:
-            allowed, budget = await self.budget_engine.check_circuit_breaker(db, boards_requested=1, year_month=cycle_key)
-        except BudgetExhaustedException as exc:
-            logger.error(f"Pre-Draw Pipeline HALTED: {exc}")
-            await self.notifier.notify_budget_exhaustion(
-                year_month=cycle_key,
-                remaining_boards=0,
-                total_budget=str(settings.DEFAULT_MONTHLY_BUDGET),
-            )
-            return {
-                "status": "HALTED",
-                "reason": "Budget Exhausted",
-                "remaining_boards": 0,
-                "generated_boards_count": 0,
-            }
-
-        # 2. Iterate each scheduled bundle
+        # 2. Iterate each scheduled bundle (circuit breaker enforced per pool)
         for bundle in bundles:
-            if budget.remaining_boards <= 0:
-                logger.warning("Monthly budget exhausted mid-pipeline. Halting subsequent bundles.")
-                break
+            pool = budget_pool_for_bundle(bundle.value)
 
-            logger.info(f"Processing pre-draw analysis for bundle {bundle.value}...")
+            # Directive 3: pool-scoped Circuit Breaker Check
+            try:
+                allowed, budget = await self.budget_engine.check_circuit_breaker(
+                    db, boards_requested=1, year_month=cycle_key, pool=pool
+                )
+            except BudgetExhaustedException as exc:
+                halted = True
+                logger.error(f"Pre-Draw Pipeline: {pool} pool exhausted for {bundle.value}: {exc}")
+                pool_budget = Decimal(str(
+                    settings.DAILY_LOTTO_MONTHLY_BUDGET
+                    if pool == "DAILY_LOTTO"
+                    else settings.BUNDLE_MONTHLY_BUDGET
+                ))
+                await self.notifier.notify_budget_exhaustion(
+                    year_month=cycle_key,
+                    remaining_boards=0,
+                    total_budget=str(pool_budget),
+                )
+                results_by_game[bundle.value] = {"error": "Budget Exhausted", "pool": pool}
+                continue
+
+            if budget.remaining_boards <= 0:
+                logger.warning(f"{pool} pool exhausted. Skipping bundle {bundle.value}.")
+                halted = True
+                continue
+
+            logger.info(f"Processing pre-draw analysis for bundle {bundle.value} (pool={pool})...")
 
             # Directive 21 & 22: Multi-draw Statistical Pre-Processing across all sub-draws in bundle
             bundle_data = await self.stats_service.get_stats_for_bundle(db, bundle, sample_size=50)
@@ -165,6 +184,7 @@ class PipelineOrchestrator:
                 game_type=bundle.value,
                 target_date=ref_date,
                 performance_summary=feedback_summary,
+                pool=pool,
             )
             boards_to_generate = allocation.total_allocated
 
@@ -248,27 +268,44 @@ class PipelineOrchestrator:
 
             await db.commit()
 
-            # Deduct quota from monthly budget
+            # Deduct quota from the bundle's budget pool
             if created_for_bundle:
                 budget = await self.budget_engine.record_board_allocation(
-                    db, boards_count=len(created_for_bundle), year_month=cycle_key
+                    db,
+                    boards_count=len(created_for_bundle),
+                    year_month=cycle_key,
+                    pool=pool,
                 )
+                remaining_by_pool[pool] = budget.remaining_boards
                 total_generated += len(created_for_bundle)
                 results_by_game[bundle.value] = {
                     "boards_count": len(created_for_bundle),
                     "confidence_scores": [b.confidence_score for b in created_for_bundle],
+                    "pool": pool,
                 }
 
+        if total_generated == 0 and halted:
+            logger.error("Pre-Draw Pipeline HALTED: all scheduled pools exhausted.")
+            return {
+                "status": "HALTED",
+                "reason": "Budget Exhausted",
+                "remaining_boards": 0,
+                "generated_boards_count": 0,
+                "details": results_by_game,
+            }
+
+        remaining_boards = budget.remaining_boards if budget is not None else 0
         logger.info(
             f"Pre-Draw Pipeline completed: {total_generated} boards generated across {len(results_by_game)} bundles. "
-            f"Remaining budget boards: {budget.remaining_boards}."
+            f"Remaining boards by pool: {remaining_by_pool}."
         )
 
         return {
             "status": "COMPLETED",
             "target_date": ref_date.isoformat(),
             "generated_boards_count": total_generated,
-            "remaining_budget_boards": budget.remaining_boards,
+            "remaining_budget_boards": remaining_boards,
+            "remaining_by_pool": remaining_by_pool,
             "details": results_by_game,
         }
 
@@ -310,11 +347,18 @@ class PipelineOrchestrator:
         logger.info(f"Found {len(pending_boards)} pending generated boards to evaluate.")
 
         for board in pending_boards:
-            b_name = board.bundle_name or "LOTTO_FAMILY"
+            b_name = board.bundle_name or board.game_type
             try:
                 b_type = BundleType(b_name)
-            except ValueError:
-                b_type = BundleType.LOTTO_FAMILY
+            except (ValueError, TypeError):
+                try:
+                    b_type = GAME_TO_BUNDLE[GameType(b_name)]
+                except (ValueError, TypeError, KeyError):
+                    logger.warning(
+                        f"Skipping board #{board.id}: unrecognized bundle/game '{b_name}'."
+                    )
+                    continue
+                b_name = b_type.value
             member_games = [g.value for g in BUNDLE_GAMES.get(b_type, [])]
 
             # Fetch official draws for member sub-games matching the exact target draw date
@@ -634,6 +678,7 @@ class PipelineOrchestrator:
             GameType.LOTTO_PLUS_2,
             GameType.POWERBALL,
             GameType.POWERBALL_PLUS,
+            GameType.DAILY_LOTTO,
         ]
         ref_date = analysis_date or date.today()
         logger.info(f"Starting Weekly Temporal Analysis pipeline for {len(target_games)} games on {ref_date}")

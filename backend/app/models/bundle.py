@@ -16,9 +16,10 @@ from app.models.base import Base
 class GameBundle(Base):
     """Represents a lottery game family bundle (Directive 21).
 
-    Groups Lotto + Plus 1 + Plus 2 into LOTTO_FAMILY and
-    PowerBall + PowerBall Plus into POWERBALL_FAMILY.
-    A single generated board applies to all sub-draws in the bundle.
+    Groups Lotto + Plus 1 + Plus 2 into LOTTO_FAMILY, PowerBall +
+    PowerBall Plus into POWERBALL_FAMILY, and the standalone Daily Lotto
+    into DAILY_LOTTO. A single generated board applies to all sub-draws
+    in the bundle.
     """
 
     __tablename__ = "game_bundles"
@@ -29,7 +30,7 @@ class GameBundle(Base):
         unique=True,
         nullable=False,
         index=True,
-        comment="'LOTTO_FAMILY' or 'POWERBALL_FAMILY'",
+        comment="'LOTTO_FAMILY', 'POWERBALL_FAMILY' or 'DAILY_LOTTO'",
     )
     main_matrix_rule: Mapped[str] = mapped_column(
         String(20),

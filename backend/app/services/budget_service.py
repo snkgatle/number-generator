@@ -20,19 +20,21 @@ class BudgetService:
         return BudgetEngine.current_year_month(target_date)
 
     async def get_or_create_monthly_budget(
-        self, db: AsyncSession, year_month: Optional[str] = None
+        self, db: AsyncSession, year_month: Optional[str] = None, pool: str = "BUNDLE"
     ) -> MonthlyBudget:
-        return await self.engine.get_or_create_monthly_budget(db, year_month=year_month)
+        return await self.engine.get_or_create_monthly_budget(db, year_month=year_month, pool=pool)
 
     async def verify_circuit_breaker(
-        self, db: AsyncSession, boards_requested: int = 1
+        self, db: AsyncSession, boards_requested: int = 1, pool: str = "BUNDLE"
     ) -> Tuple[bool, MonthlyBudget]:
-        return await self.engine.check_circuit_breaker(db, boards_requested=boards_requested)
+        return await self.engine.check_circuit_breaker(db, boards_requested=boards_requested, pool=pool)
 
     async def record_board_usage(
-        self, db: AsyncSession, boards_used: int = 1, year_month: Optional[str] = None
+        self, db: AsyncSession, boards_used: int = 1, year_month: Optional[str] = None, pool: str = "BUNDLE"
     ) -> MonthlyBudget:
-        return await self.engine.record_board_allocation(db, boards_count=boards_used, year_month=year_month)
+        return await self.engine.record_board_allocation(
+            db, boards_count=boards_used, year_month=year_month, pool=pool
+        )
 
 
 __all__ = ["BudgetService", "BudgetExhaustedException"]

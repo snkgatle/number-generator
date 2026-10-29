@@ -244,7 +244,8 @@ export const ResultsView: React.FC = () => {
     { value: 'ALL', label: 'All bundles & games' },
     { value: 'LOTTO_FAMILY', label: 'Lotto Bundle' },
     { value: 'POWERBALL_FAMILY', label: 'PowerBall Bundle' },
-    ...GAMES.map((g) => ({ value: g.id, label: g.label })),
+    { value: 'DAILY_LOTTO', label: 'Daily Lotto' },
+    ...GAMES.filter((g) => g.id !== 'DAILY_LOTTO').map((g) => ({ value: g.id, label: g.label })),
   ];
 
   const statusFilterOptions = [

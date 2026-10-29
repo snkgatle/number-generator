@@ -41,8 +41,12 @@ async def scheduled_monthly_rollover_task():
     try:
         engine = BudgetEngine()
         async with AsyncSessionLocal() as db:
-            budget = await engine.get_or_create_monthly_budget(db)
-            logger.info(f"Monthly budget ready for period {budget.year_month}: {budget.total_boards} boards.")
+            for pool in ("BUNDLE", "DAILY_LOTTO"):
+                budget = await engine.get_or_create_monthly_budget(db, pool=pool)
+                logger.info(
+                    f"Monthly budget ready for period {budget.year_month}/{budget.pool}: "
+                    f"{budget.total_boards} boards."
+                )
     except Exception as exc:
         logger.error(f"Error in scheduled monthly rollover task: {exc}", exc_info=True)
 
@@ -59,19 +63,21 @@ async def scheduled_weekly_temporal_analysis_task():
 
 def register_scheduled_jobs():
     """Registers standard cron triggers for LottoMind automated workflows."""
-    # Pre-Draw Generation: Tue, Wed, Fri, Sat at 18:00
+    # Pre-Draw Generation: every day at 18:00. The weekday resolver only
+    # emits bundles scheduled for that day (Daily Lotto: Sun/Mon/Thu;
+    # Lotto/PowerBall families as per SCHEDULED_BUNDLES_BY_WEEKDAY).
     scheduler.add_job(
         scheduled_pre_draw_task,
-        trigger=CronTrigger(day_of_week="tue,wed,fri,sat", hour=18, minute=0),
+        trigger=CronTrigger(day_of_week="mon,tue,wed,thu,fri,sat,sun", hour=18, minute=0),
         id="lottomind_pre_draw_generation",
         name="LottoMind Pre-Draw Board Generation",
         replace_existing=True,
     )
 
-    # Post-Draw Scraping & Feedback: Tue, Wed, Fri, Sat at 22:30
+    # Post-Draw Scraping & Feedback: every day at 22:30 (Daily Lotto draws nightly).
     scheduler.add_job(
         scheduled_post_draw_task,
-        trigger=CronTrigger(day_of_week="tue,wed,fri,sat", hour=22, minute=30),
+        trigger=CronTrigger(day_of_week="mon,tue,wed,thu,fri,sat,sun", hour=22, minute=30),
         id="lottomind_post_draw_evaluation",
         name="LottoMind Post-Draw Evaluation & Feedback",
         replace_existing=True,

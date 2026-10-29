@@ -20,7 +20,14 @@ from app.schemas.board import (
     PostDrawFeedbackResponse,
     PreDrawPipelineRequest,
 )
-from app.schemas.enums import BundleType, GameType, GAME_TO_BUNDLE, BUNDLE_GAMES, get_next_draw_date
+from app.schemas.enums import (
+    BundleType,
+    GameType,
+    GAME_TO_BUNDLE,
+    BUNDLE_GAMES,
+    budget_pool_for_bundle,
+    get_next_draw_date,
+)
 from app.schemas.feedback import FeedbackPerformanceSummary, GenerationFeedbackResponse
 from app.services.ai_service import AIService, AIServiceError
 from app.services.analytics_service import TemporalAnalyticsService
@@ -138,6 +145,7 @@ async def generate_boards(
     bundle_type = payload.resolved_bundle()
     target_date = payload.target_draw_date or get_next_draw_date(bundle_type)
     cycle_key = budget_service.current_year_month(target_date)
+    pool = budget_pool_for_bundle(bundle_type.value)
 
     # Query GameBundle entity to link bundle_id and cost
     bundle_res = await db.execute(
@@ -150,7 +158,7 @@ async def generate_boards(
     # Directive 3: Budget Circuit Breaker check
     try:
         allowed, budget = await budget_service.verify_circuit_breaker(
-            db, boards_requested=requested_boards
+            db, boards_requested=requested_boards, pool=pool
         )
         if not allowed:
             raise HTTPException(
@@ -164,7 +172,11 @@ async def generate_boards(
         await notifier.notify_budget_exhaustion(
             year_month=cycle_key,
             remaining_boards=0,
-            total_budget=str(settings.DEFAULT_MONTHLY_BUDGET),
+            total_budget=str(
+                settings.DAILY_LOTTO_MONTHLY_BUDGET
+                if pool == "DAILY_LOTTO"
+                else settings.BUNDLE_MONTHLY_BUDGET
+            ),
         )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -254,7 +266,9 @@ async def generate_boards(
     await db.commit()
 
     # Deduct quota from monthly budget
-    await budget_service.record_board_usage(db, boards_used=len(created_boards), year_month=cycle_key)
+    await budget_service.record_board_usage(
+        db, boards_used=len(created_boards), year_month=cycle_key, pool=pool
+    )
 
     # Refresh entities for response serialization
     for b in created_boards:

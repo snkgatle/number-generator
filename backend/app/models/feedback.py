@@ -48,7 +48,7 @@ class GenerationFeedback(Base, TimestampMixin):
         String(50),
         nullable=False,
         index=True,
-        comment="Bundle identifier: LOTTO_FAMILY or POWERBALL_FAMILY",
+        comment="Bundle identifier: LOTTO_FAMILY, POWERBALL_FAMILY or DAILY_LOTTO",
     )
     game_type: Mapped[str] = mapped_column(
         String(50),

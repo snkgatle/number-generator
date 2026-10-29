@@ -11,6 +11,7 @@ from app.schemas.enums import (
     GAME_RULES,
     BUNDLE_RULES,
     GAME_TO_BUNDLE,
+    is_bundle_key,
 )
 
 
@@ -174,7 +175,7 @@ class AIGenerationResponse(BaseModel):
     def validate_against_game_rules(self) -> None:
         """Validates all generated boards against official game or bundle matrix rules."""
         raw_key = self.game_type.value if hasattr(self.game_type, "value") else str(self.game_type)
-        if raw_key in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+        if is_bundle_key(raw_key):
             rules = BUNDLE_RULES.get(BundleType(raw_key), {})
         else:
             rules = GAME_RULES.get(GameType(raw_key), {})
@@ -211,7 +212,7 @@ class GenerationRequest(BaseModel):
     """Payload to request board generation for an upcoming draw."""
     bundle_name: Optional[Union[BundleType, str]] = Field(
         None,
-        description="Bundle identifier (LOTTO_FAMILY or POWERBALL_FAMILY)",
+        description="Bundle identifier (LOTTO_FAMILY, POWERBALL_FAMILY or DAILY_LOTTO)",
     )
     game_type: Optional[Union[GameType, BundleType, str]] = Field(
         None,
@@ -230,7 +231,7 @@ class GenerationRequest(BaseModel):
         target = self.bundle_name or self.game_type or BundleType.LOTTO_FAMILY
         target_str = target.value if hasattr(target, "value") else str(target)
 
-        if target_str in ("LOTTO_FAMILY", "POWERBALL_FAMILY"):
+        if is_bundle_key(target_str):
             return BundleType(target_str)
         try:
             gt = GameType(target_str)

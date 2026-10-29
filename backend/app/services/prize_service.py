@@ -7,7 +7,14 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
-from app.schemas.enums import GAME_RULES, GameType
+from app.schemas.enums import (
+    BUNDLE_RULES,
+    GAME_RULES,
+    GAME_TO_BUNDLE,
+    BundleType,
+    GameType,
+    is_bundle_key,
+)
 
 
 class PrizeEvaluation(BaseModel):
@@ -89,6 +96,15 @@ POWERBALL_PRIZE_TIERS = [
     {"division": "Division 9", "match_main": 0, "match_bonus": True, "payout": Decimal("10.00")},
 ]
 
+# DAILY LOTTO (5/36, no bonus ball). Pari-mutuel divisions; payouts below are
+# 365-day average benchmarks and therefore indicative, not fixed.
+DAILY_LOTTO_PRIZE_TIERS = [
+    {"division": "Division 1 (Match 5)", "match_main": 5, "match_bonus": False, "payout": Decimal("258850.00")},
+    {"division": "Division 2 (Match 4)", "match_main": 4, "match_bonus": False, "payout": Decimal("524.28")},
+    {"division": "Division 3 (Match 3)", "match_main": 3, "match_bonus": False, "payout": Decimal("19.91")},
+    {"division": "Division 4 (Match 2)", "match_main": 2, "match_bonus": False, "payout": Decimal("5.00")},
+]
+
 
 class PrizeService:
     """Evaluates lottery boards against official draw results to determine ZAR prizes and ROI."""
@@ -100,6 +116,8 @@ class PrizeService:
             return LOTTO_PRIZE_TIERS
         elif game_type in (GameType.LOTTO_PLUS_1, GameType.LOTTO_PLUS_2):
             return LOTTO_PLUS_PRIZE_TIERS
+        elif game_type == GameType.DAILY_LOTTO:
+            return DAILY_LOTTO_PRIZE_TIERS
         else:
             return POWERBALL_PRIZE_TIERS
 
@@ -167,14 +185,31 @@ class PrizeService:
         board_numbers: List[int],
         board_special: Optional[int],
         draws: List[Any],
-        bundle_name: str = "LOTTO_FAMILY",
-        cost_per_board: Decimal = Decimal("10.00"),
+        bundle_name: Optional[str] = None,
+        cost_per_board: Optional[Decimal] = None,
         board_id: Optional[int] = None,
     ) -> BundleBoardEvaluation:
         """Directive 24: Evaluates a single board against all actual sub-draws for that date.
 
-        Sums the prizes before calculating net yield and ROI.
+        Sums the prizes before calculating net yield and ROI. When bundle_name or
+        cost_per_board are omitted, they are derived from the draw's game type and
+        the bundle rules so Daily Lotto (R3.00) is never evaluated at bundle prices.
         """
+        resolved_bundle = bundle_name
+        if not resolved_bundle and draws:
+            try:
+                resolved_bundle = GAME_TO_BUNDLE[GameType(draws[0].game_type)].value
+            except (ValueError, AttributeError, KeyError):
+                resolved_bundle = ""
+        resolved_bundle = resolved_bundle or ""
+
+        if cost_per_board is None:
+            if is_bundle_key(resolved_bundle):
+                rules = BUNDLE_RULES.get(BundleType(resolved_bundle), {})
+            else:
+                rules = {}
+            cost_per_board = Decimal(str(rules.get("total_cost", 10.00)))
+
         sub_evals: Dict[str, PrizeEvaluation] = {}
         total_payout = Decimal("0.00")
         target_date_str = ""
@@ -204,7 +239,7 @@ class PrizeService:
 
         return BundleBoardEvaluation(
             board_id=board_id,
-            bundle_name=bundle_name,
+            bundle_name=resolved_bundle,
             target_draw_date=target_date_str,
             sub_evaluations=sub_evals,
             total_winnings_zar=total_payout,

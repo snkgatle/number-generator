@@ -86,9 +86,12 @@ export interface HealthResponse {
   database: string;
 }
 
+export type BudgetPool = 'BUNDLE' | 'DAILY_LOTTO';
+
 export interface MonthlyBudget {
   id: number;
   year_month: string;
+  pool: BudgetPool;
   total_budget: number;
   cost_per_board: number;
   total_boards: number;
@@ -142,10 +145,18 @@ export async function fetchHealth(): Promise<HealthResponse> {
   return response.json();
 }
 
-export async function fetchCurrentBudget(): Promise<MonthlyBudget> {
-  const response = await apiFetch(`${API_BASE_URL}/dashboard/budget/current`);
+export async function fetchCurrentBudget(pool: BudgetPool = 'BUNDLE'): Promise<MonthlyBudget> {
+  const response = await apiFetch(`${API_BASE_URL}/dashboard/budget/current?pool=${pool}`);
   if (!response.ok) {
     throw new Error(`Failed to fetch current budget: ${response.statusText}`);
+  }
+  return response.json();
+}
+
+export async function fetchAllBudgets(): Promise<MonthlyBudget[]> {
+  const response = await apiFetch(`${API_BASE_URL}/dashboard/budgets`);
+  if (!response.ok) {
+    throw new Error(`Failed to fetch budgets: ${response.statusText}`);
   }
   return response.json();
 }
@@ -277,6 +288,7 @@ export interface BoardWithResult extends GeneratedBoard {
 export interface CircuitBreakerStatus {
   allowed: boolean;
   year_month: string;
+  pool: BudgetPool;
   remaining_boards: number;
   used_boards: number;
   total_boards: number;
@@ -299,6 +311,7 @@ export interface BoardAllocationRecommendation {
 
 export interface AllocationPlan {
   year_month: string;
+  pool: BudgetPool;
   total_budget_zar: number;
   total_boards: number;
   used_boards: number;
@@ -347,18 +360,21 @@ export async function markBoardPlayed(boardId: number): Promise<BoardWithResult>
   return response.json();
 }
 
-export async function fetchCircuitBreaker(): Promise<CircuitBreakerStatus> {
-  const response = await apiFetch(`${API_BASE_URL}/dashboard/circuit-breaker`);
+export async function fetchCircuitBreaker(pool: BudgetPool = 'BUNDLE'): Promise<CircuitBreakerStatus> {
+  const response = await apiFetch(`${API_BASE_URL}/dashboard/circuit-breaker?pool=${pool}`);
   if (!response.ok) {
     throw new Error(`Failed to check circuit breaker: ${response.statusText}`);
   }
   return response.json();
 }
 
-export async function fetchAllocationPlan(yearMonth?: string): Promise<AllocationPlan> {
-  const url = yearMonth
-    ? `${API_BASE_URL}/dashboard/allocation-plan?year_month=${yearMonth}`
-    : `${API_BASE_URL}/dashboard/allocation-plan`;
+export async function fetchAllocationPlan(
+  yearMonth?: string,
+  pool: BudgetPool = 'BUNDLE'
+): Promise<AllocationPlan> {
+  const params = new URLSearchParams({ pool });
+  if (yearMonth) params.set('year_month', yearMonth);
+  const url = `${API_BASE_URL}/dashboard/allocation-plan?${params.toString()}`;
   const response = await apiFetch(url);
   if (!response.ok) {
     throw new Error(`Failed to fetch allocation plan: ${response.statusText}`);
